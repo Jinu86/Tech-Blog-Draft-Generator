@@ -423,7 +423,30 @@ def handle_input(user_input):
     elif step == Step.KEYWORD_QUESTION.value:
         st.session_state.collected["user_keywords_raw"] = user_input
         st.session_state.step = Step.KEYWORD_CONFIRM.value
-        prompt = f"사용자가 입력한 키워드 후보: {user_input}\n위 내용을 정리하여 GPT가 키워드 리스트로 정제하고, 확인 질문 포함한 메시지 생성"
+        
+        prompt = f"""
+{REACT_SYSTEM_PROMPT}
+
+주제: "{st.session_state.collected.get('user_topic', '')}"
+사용자가 선택한 키워드: "{user_input}"
+
+위 내용을 바탕으로 다음 작업을 수행해주세요:
+1. 사용자가 선택한 키워드를 정리하여 깔끔한 목록으로 만들어주세요.
+2. 쉼표나 기타 구분자로 나뉜 키워드를 각각 별도의 항목으로 처리해주세요.
+3. 중복된 키워드는 제거해주세요.
+4. 키워드 목록을 불릿 포인트(-)로 정리해주세요.
+5. 마지막에 "이 키워드를 중심으로 글을 작성해도 괜찮을까요?"라고 물어봐주세요.
+
+예시 출력 형식:
+🧐 제가 이해한 최종 키워드는 다음과 같습니다:  
+- 키워드1
+- 키워드2
+- 키워드3
+
+⚙️ 이 키워드를 중심으로 글을 작성해도 괜찮을까요?
+수정하거나 추가하고 싶은 키워드가 있다면 알려주세요!
+"""
+        
         response_text = process_model_request(prompt)
         bot_say(response_text)
 
