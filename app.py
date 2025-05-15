@@ -566,23 +566,11 @@ def handle_input(user_input):
 
     # 구조 확인 단계
     elif step == Step.STRUCTURE_CONFIRM.value:
-        def positive_action():
-            suggested_structure = st.session_state.collected.get("suggested_structure", "")
-            bot_say(f"""좋습니다! 이제 각 섹션의 소제목을 작성해볼까요?
-
-제안된 구조를 바탕으로 각 섹션의 소제목을 작성해주세요.
-예시 형식:
-1. [서론] Docker의 이해와 필요성
-2. [본문] Docker 기본 개념과 작동 원리
-3. [본문] Docker 실전 활용 사례
-4. [본문] Docker와 다른 컨테이너 기술 비교
-5. [결론] Docker의 미래와 학습 방향
-
-위와 같은 형식으로 각 섹션의 소제목을 작성해주시겠어요?
-순서를 바꾸거나 섹션을 추가/삭제하셔도 됩니다.""")
-            st.session_state.step = Step.SUBTITLE_CONFIRM.value
-            
-        def negative_action():
+        # 사용자의 응답을 분석
+        user_input_lower = user_input.lower()
+        
+        # 수정 요청이 있는지 확인
+        if any(word in user_input_lower for word in ["수정", "바꿔", "다시", "다른", "변경", "고치", "아니"]):
             # 새로운 구조 제안을 위한 프롬프트 생성
             prompt = f"""
 {REACT_SYSTEM_PROMPT}
@@ -611,21 +599,45 @@ def handle_input(user_input):
             response_text = process_model_request(prompt)
             st.session_state.collected["suggested_structure"] = response_text
             bot_say(response_text)
+            return
             
-        handle_confirmation(
-            user_input, 
-            positive_action, 
-            negative_action,
-            "제안해드린 구조가 마음에 드시나요? 아니면 다른 구조를 원하시나요?"
-        )
+        # 진행 의사가 있는지 확인
+        if any(word in user_input_lower for word in ["네", "좋아", "괜찮", "진행", "시작", "다음"]):
+            suggested_structure = st.session_state.collected.get("suggested_structure", "")
+            topic = st.session_state.collected.get('user_topic', '')
+            style = st.session_state.collected.get('user_style_raw', '')
+            
+            bot_say(f"""좋습니다! '{topic}'에 대한 블로그를 {style} 스타일로 작성하기 위한 소제목을 정해볼까요?
+
+제안된 구조를 바탕으로 각 섹션의 소제목을 작성해주세요.
+예시 형식:
+1. [서론] Docker의 이해와 필요성
+2. [본문] Docker 기본 개념과 작동 원리
+3. [본문] Docker 실전 활용 사례
+4. [본문] Docker와 다른 컨테이너 기술 비교
+5. [결론] Docker의 미래와 학습 방향
+
+위와 같은 형식으로 각 섹션의 소제목을 작성해주시겠어요?
+순서를 바꾸거나 섹션을 추가/삭제하셔도 됩니다.""")
+            st.session_state.step = Step.SUBTITLE_CONFIRM.value
+            return
+            
+        # 응답이 명확하지 않은 경우
+        bot_say("""제안된 구조에 대해 어떻게 생각하시나요?
+- 진행하시려면 '네', '좋아요', '진행할게요'라고 말씀해주세요.
+- 수정이 필요하시다면 '수정', '다시', '바꿔' 등의 말씀을 해주세요.""")
 
     # 소제목 확인 단계
     elif step == Step.SUBTITLE_CONFIRM.value:
         if not user_input:
             # 처음 이 단계에 진입했을 때
             suggested_structure = st.session_state.collected.get("suggested_structure", "")
-            bot_say(f"""제안된 구조를 바탕으로 각 섹션의 소제목을 작성해주세요.
+            topic = st.session_state.collected.get('user_topic', '')
+            style = st.session_state.collected.get('user_style_raw', '')
+            
+            bot_say(f"""'{topic}'에 대한 블로그를 {style} 스타일로 작성하기 위한 소제목을 정해볼까요?
 
+제안된 구조를 바탕으로 각 섹션의 소제목을 작성해주세요.
 예시 형식:
 1. [서론] Docker의 이해와 필요성
 2. [본문] Docker 기본 개념과 작동 원리
@@ -656,11 +668,14 @@ def handle_input(user_input):
 
         # 소제목 확인 메시지
         formatted_subtitles = "\n".join([f"{i+1}. {s}" for i, s in enumerate(subtitles)])
-        bot_say(f"""🧐 제가 이해한 소제목은 다음과 같습니다:
+        topic = st.session_state.collected.get('user_topic', '')
+        style = st.session_state.collected.get('user_style_raw', '')
+        
+        bot_say(f"""🧐 '{topic}'에 대한 블로그를 {style} 스타일로 작성하기 위한 소제목을 다음과 같이 이해했습니다:
 
 {formatted_subtitles}
 
-⚙️ 이 소제목으로 진행해도 괜찮을까요?
+⚙️ 이 소제목으로 진행해도 될까요?
 수정이 필요하다면 다시 작성해주세요.""")
         
         st.session_state.collected["finalized_subtitles"] = subtitles
@@ -668,32 +683,24 @@ def handle_input(user_input):
 
     # 소제목 확인 응답 처리
     elif step == Step.SUBTITLE_CONFIRM.value and user_input:
-        # 사용자의 응답을 분석
-        user_input_lower = user_input.lower()
-        
         # 수정 요청이 있는지 확인
-        if any(word in user_input_lower for word in ["수정", "바꿔", "다시", "다른", "변경", "고치"]):
+        if any(word in user_input.lower() for word in ["수정", "바꿔", "다시", "다른", "변경", "고치", "아니"]):
             bot_say("네, 소제목을 다시 작성해주시겠어요?")
             st.session_state.step = Step.SUBTITLE_CONFIRM.value
             return
             
-        # 긍정 응답 확인
-        if is_positive_response(user_input) is True:
+        # 진행 의사가 있는지 확인
+        if any(word in user_input.lower() for word in ["네", "좋아", "괜찮", "진행", "시작", "다음"]):
             st.session_state.step = Step.DRAFT_GENERATE.value
             st.session_state.draft_index = 0
-            bot_say("좋습니다! 이제 각 섹션별로 초안을 작성해드릴게요. 첫 번째 섹션부터 시작할까요?")
+            topic = st.session_state.collected.get('user_topic', '')
+            bot_say(f"좋습니다! '{topic}'에 대한 블로그 초안을 작성해드릴게요. 첫 번째 섹션부터 시작할까요?")
             handle_input("")  # 자동으로 첫 섹션 초안 생성 시작
             return
             
-        # 부정 응답 확인
-        if is_positive_response(user_input) is False:
-            bot_say("네, 소제목을 다시 작성해주시겠어요?")
-            st.session_state.step = Step.SUBTITLE_CONFIRM.value
-            return
-            
         # 응답이 명확하지 않은 경우
-        bot_say("""소제목이 마음에 드시나요? 
-- 진행하시려면 '네' 또는 '좋아요'라고 말씀해주세요.
+        bot_say("""소제목에 대해 어떻게 생각하시나요?
+- 진행하시려면 '네', '좋아요', '진행할게요'라고 말씀해주세요.
 - 수정이 필요하시다면 '수정', '다시', '바꿔' 등의 말씀을 해주세요.""")
 
     # 초안 생성 단계
