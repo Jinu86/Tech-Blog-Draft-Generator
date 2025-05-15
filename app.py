@@ -640,28 +640,51 @@ def handle_input(user_input):
 5. [결론] Docker의 미래와 학습 방향
 
 위와 같은 형식으로 각 섹션의 소제목을 작성해주시겠어요?
-순서를 바꾸거나 섹션을 추가/삭제하셔도 됩니다.""")
+순서를 바꾸거나 섹션을 추가/삭제하셔도 됩니다.
+소제목 추천이 필요하시다면 '추천해줘' 또는 '어떤것들이 있어?'라고 말씀해주세요.""")
             return
 
-        # 사용자가 소제목을 입력한 경우
-        subtitles = [s.strip() for s in user_input.split("\n") if s.strip()]
-        
-        # 예시 요청인지 확인
-        if any(word in user_input.lower() for word in ["예시", "예를", "보여", "보여줘", "보여주", "예시를", "예시를 보여"]):
+        # 추천 요청인지 확인 (이 부분을 먼저 체크)
+        if any(word in user_input.lower() for word in ["추천", "어떤것", "뭐가", "보여", "예시", "예를"]):
             topic = st.session_state.collected.get('user_topic', '')
             style = st.session_state.collected.get('user_style_raw', '')
+            keywords = st.session_state.collected.get('user_keywords_raw', '')
             
-            bot_say(f"""'{topic}'에 대한 블로그를 {style} 스타일로 작성하기 위한 소제목 예시를 보여드릴게요:
+            # 추천 소제목 생성
+            prompt = f"""
+{REACT_SYSTEM_PROMPT}
 
-1. [서론] {topic}의 이해와 필요성
-2. [본문] {topic}의 기본 개념과 작동 원리
-3. [본문] {topic}의 실전 활용 사례
-4. [본문] {topic}과 다른 기술 비교
-5. [결론] {topic}의 미래와 학습 방향
+주제: {topic}
+키워드: {keywords}
+스타일: {style}
 
-위와 같은 형식으로 소제목을 작성해주시면 됩니다.
-각 섹션에 [서론], [본문], [결론] 중 하나를 포함해주세요.""")
+위 정보를 바탕으로 블로그의 소제목을 추천해주세요.
+다음 가이드라인을 따라주세요:
+
+1. 서론, 본문(2-3개 섹션), 결론의 기본 구조를 포함해주세요.
+2. 각 섹션은 명확하고 구체적인 제목을 가져야 합니다.
+3. 제목만 나열해주세요.
+4. 각 섹션에 [서론], [본문], [결론] 중 하나를 포함해주세요.
+
+예시 형식:
+1. [서론] Docker의 이해와 필요성
+2. [본문] Docker 기본 개념과 작동 원리
+3. [본문] Docker 실전 활용 사례
+4. [본문] Docker와 다른 컨테이너 기술 비교
+5. [결론] Docker의 미래와 학습 방향
+"""
+            recommended_subtitles = process_model_request(prompt)
+            
+            bot_say(f"""'{topic}'에 대한 블로그를 {style} 스타일로 작성하기 위한 소제목을 추천해드릴게요:
+
+{recommended_subtitles}
+
+이 중에서 마음에 드는 소제목을 선택하거나 수정해서 사용하셔도 됩니다.
+소제목을 작성하시겠어요?""")
             return
+
+        # 사용자가 소제목을 입력한 경우 (추천 요청이 아닌 경우에만 실행)
+        subtitles = [s.strip() for s in user_input.split("\n") if s.strip()]
         
         # 소제목 형식 검증
         if not all(any(marker in s for marker in ["[서론]", "[본문]", "[결론]"]) for s in subtitles):
