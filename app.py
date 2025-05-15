@@ -38,7 +38,7 @@ if 'state' not in st.session_state:
     # 첫 인사 및 서비스 소개
     intro = (
         "안녕하세요! 저는 기술 블로그 초안 작성 도우미 챗봇입니다.\n"
-        "ReAct 방식으로 단계별 대화를 통해 주제부터 최종 초안까지 함께 작성해봐요."
+        "어떤 주제로 블로그를 작성하고 싶으신가요?"
     )
     st.session_state.history.append({'role':'assistant','content':intro})
 
