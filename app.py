@@ -385,7 +385,7 @@ def handle_input(user_input):
     # 주제 확인 단계
     elif step == Step.TOPIC_CONFIRM.value:
         # 주제가 구체화가 필요한 경우
-        if "구체" in user_input.lower() or "어떤" in user_input.lower() or "?" in user_input:
+        if any(word in user_input.lower() for word in ["구체", "어떤", "?", "더", "자세"]):
             st.session_state.step = Step.TOPIC_QUESTION.value
             bot_say("네, 주제를 더 구체적으로 말씀해주시면 좋겠습니다.")
             return
@@ -442,7 +442,7 @@ def handle_input(user_input):
 2. 쉼표나 기타 구분자로 나뉜 키워드를 각각 별도의 항목으로 처리해주세요.
 3. 중복된 키워드는 제거해주세요.
 4. 키워드 목록을 불릿 포인트(-)로 정리해주세요.
-5. 마지막에 "이 키워드를 중심으로 글을 작성해도 괜찮을까요?"라고 물어봐주세요.
+5. 마지막에 "이 키워드로 진행해도 될까요?"라고 물어봐주세요.
 
 예시 출력 형식:
 🧐 제가 이해한 최종 키워드는 다음과 같습니다:  
@@ -450,7 +450,7 @@ def handle_input(user_input):
 - 키워드2
 - 키워드3
 
-⚙️ 이 키워드를 중심으로 글을 작성해도 괜찮을까요?
+⚙️ 이 키워드로 진행해도 될까요?
 수정하거나 추가하고 싶은 키워드가 있다면 알려주세요!
 """
         
@@ -459,32 +459,70 @@ def handle_input(user_input):
 
     # 키워드 확인 단계
     elif step == Step.KEYWORD_CONFIRM.value:
-        def positive_action():
-            bot_say("스타일을 정해볼게요. 문체와 대상 독자를 알려주세요.")
-            st.session_state.step = Step.STYLE_QUESTION.value
-            
-        def negative_action():
-            bot_say("다시 키워드를 입력해주세요.")
+        # 수정 요청이 있는지 확인
+        if any(word in user_input.lower() for word in ["수정", "바꿔", "다시", "다른", "변경", "고치", "아니"]):
+            bot_say("네, 키워드를 다시 선택해주시겠어요?")
             st.session_state.step = Step.KEYWORD_QUESTION.value
+            return
             
-        handle_confirmation(
-            user_input, 
-            positive_action, 
-            negative_action,
-            "제가 정리한 키워드가 마음에 드시나요? 아니면 다른 키워드를 원하시나요?"
-        )
+        # 진행 의사가 있는지 확인
+        if any(word in user_input.lower() for word in ["네", "좋아", "괜찮", "진행", "시작", "다음"]):
+            bot_say("""이제 블로그의 스타일을 정해볼까요?
+
+아래는 참고할 수 있는 예시입니다:
+
+- 형식: 튜토리얼, 기술 리뷰, 문제 해결 사례
+- 문체: 친근한, 공식적인, 중립적
+- 독자 대상: 초보자, 중급 개발자, 전문가
+
+예시에서 골라도 좋고, 자유롭게 원하는 스타일로 작성해주시겠어요?
+예: "튜토리얼 형식, 친근한 톤, 초보자 대상" """)
+            st.session_state.step = Step.STYLE_QUESTION.value
+            return
+            
+        # 응답이 명확하지 않은 경우
+        bot_say("""선택하신 키워드에 대해 어떻게 생각하시나요?
+- 진행하시려면 '네', '좋아요', '진행할게요'라고 말씀해주세요.
+- 수정이 필요하시다면 '수정', '다시', '바꿔' 등의 말씀을 해주세요.""")
 
     # 스타일 질문 단계
     elif step == Step.STYLE_QUESTION.value:
         st.session_state.collected["user_style_raw"] = user_input
         st.session_state.step = Step.STYLE_CONFIRM.value
-        prompt = f"사용자가 입력한 스타일: {user_input}\n형식, 톤, 독자대상을 정리하여 확인 메시지 생성"
+        
+        prompt = f"""
+{REACT_SYSTEM_PROMPT}
+
+사용자가 입력한 스타일: {user_input}
+
+위 내용을 바탕으로 다음 작업을 수행해주세요:
+1. 형식, 톤, 독자대상을 정리해주세요.
+2. 각 항목을 명확하게 구분해주세요.
+3. 마지막에 "이 스타일로 진행해도 될까요?"라고 물어봐주세요.
+
+예시 출력 형식:
+🧐 제가 이해한 스타일은 다음과 같습니다:
+
+- 형식: **튜토리얼**
+- 문체: **친근한**
+- 대상 독자: **초보자**
+
+⚙️ 이 스타일로 진행해도 될까요?
+수정이 필요하시다면 말씀해주세요.
+"""
         response_text = process_model_request(prompt)
         bot_say(response_text)
 
     # 스타일 확인 단계
     elif step == Step.STYLE_CONFIRM.value:
-        def positive_action():
+        # 수정 요청이 있는지 확인
+        if any(word in user_input.lower() for word in ["수정", "바꿔", "다시", "다른", "변경", "고치", "아니"]):
+            bot_say("네, 스타일을 다시 입력해주시겠어요?")
+            st.session_state.step = Step.STYLE_QUESTION.value
+            return
+            
+        # 진행 의사가 있는지 확인
+        if any(word in user_input.lower() for word in ["네", "좋아", "괜찮", "진행", "시작", "다음"]):
             # 바로 구조 제안 프롬프트 생성
             prompt = f"""
 {REACT_SYSTEM_PROMPT}
@@ -499,7 +537,7 @@ def handle_input(user_input):
 1. 서론, 본문(2-3개 섹션), 결론의 기본 구조를 포함해주세요.
 2. 각 섹션은 명확하고 구체적인 제목을 가져야 합니다.
 3. 제목만 나열해주세요.
-4. 마지막에 "이 구조로 괜찮을까요?"라고 물어봐주세요.
+4. 마지막에 "이 구조는 어떠신가요?"라고 물어봐주세요.
 
 예시 형식:
 1. [서론] Docker의 이해와 필요성
@@ -508,23 +546,18 @@ def handle_input(user_input):
 4. [본문] Docker와 다른 컨테이너 기술 비교
 5. [결론] Docker의 미래와 학습 방향
 
-이 구조로 괜찮을까요?
+이 구조는 어떠신가요?
 """
             response_text = process_model_request(prompt)
             st.session_state.collected["suggested_structure"] = response_text
             st.session_state.step = Step.STRUCTURE_CONFIRM.value
             bot_say(response_text)
+            return
             
-        def negative_action():
-            bot_say("스타일을 다시 입력해주세요.")
-            st.session_state.step = Step.STYLE_QUESTION.value
-            
-        handle_confirmation(
-            user_input, 
-            positive_action, 
-            negative_action,
-            "제가 이해한 스타일이 맞는지 잘 모르겠어요. 이대로 진행할까요? 아니면 다른 스타일을 원하시나요?"
-        )
+        # 응답이 명확하지 않은 경우
+        bot_say("""스타일에 대해 어떻게 생각하시나요?
+- 진행하시려면 '네', '좋아요', '진행할게요'라고 말씀해주세요.
+- 수정이 필요하시다면 '수정', '다시', '바꿔' 등의 말씀을 해주세요.""")
 
     # 구조 제안 단계
     elif step == Step.STRUCTURE_SUGGEST.value:
@@ -564,7 +597,7 @@ def handle_input(user_input):
 1. 서론, 본문(2-3개 섹션), 결론의 기본 구조를 포함해주세요.
 2. 각 섹션은 명확하고 구체적인 제목을 가져야 합니다.
 3. 제목만 나열해주세요.
-4. 마지막에 "이 구조로 괜찮을까요?"라고 물어봐주세요.
+4. 마지막에 "이 구조는 어떠신가요?"라고 물어봐주세요.
 
 예시 형식:
 1. [서론] Docker의 이해와 필요성
@@ -573,7 +606,7 @@ def handle_input(user_input):
 4. [본문] Docker와 다른 컨테이너 기술 비교
 5. [결론] Docker의 미래와 학습 방향
 
-이 구조로 괜찮을까요?
+이 구조는 어떠신가요?
 """
             response_text = process_model_request(prompt)
             st.session_state.collected["suggested_structure"] = response_text
