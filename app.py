@@ -395,10 +395,14 @@ def handle_input(user_input):
 """
             recommended_keywords = process_model_request(prompt)
             
+            # 키워드를 정돈된 형식으로 변환
+            keywords_list = [kw.strip() for kw in recommended_keywords.replace('"', '').split(',')]
+            formatted_keywords = '\n'.join([f"- {kw}" for kw in keywords_list])
+            
             # 키워드 추천 템플릿 사용
             message = PROMPT_KEYWORD_QUESTION.format(
                 topic=topic,
-                recommended_keywords=recommended_keywords
+                recommended_keywords=formatted_keywords
             )
             
             bot_say(message)
