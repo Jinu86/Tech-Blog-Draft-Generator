@@ -620,12 +620,6 @@ def handle_input(user_input):
 위와 같은 형식으로 각 섹션의 소제목을 작성해주시겠어요?
 순서를 바꾸거나 섹션을 추가/삭제하셔도 됩니다.""")
             st.session_state.step = Step.SUBTITLE_CONFIRM.value
-            return
-            
-        # 응답이 명확하지 않은 경우
-        bot_say("""제안된 구조에 대해 어떻게 생각하시나요?
-- 진행하시려면 '네', '좋아요', '진행할게요'라고 말씀해주세요.
-- 수정이 필요하시다면 '수정', '다시', '바꿔' 등의 말씀을 해주세요.""")
 
     # 소제목 확인 단계
     elif step == Step.SUBTITLE_CONFIRM.value:
@@ -651,6 +645,23 @@ def handle_input(user_input):
 
         # 사용자가 소제목을 입력한 경우
         subtitles = [s.strip() for s in user_input.split("\n") if s.strip()]
+        
+        # 예시 요청인지 확인
+        if any(word in user_input.lower() for word in ["예시", "예를", "보여", "보여줘", "보여주", "예시를", "예시를 보여"]):
+            topic = st.session_state.collected.get('user_topic', '')
+            style = st.session_state.collected.get('user_style_raw', '')
+            
+            bot_say(f"""'{topic}'에 대한 블로그를 {style} 스타일로 작성하기 위한 소제목 예시를 보여드릴게요:
+
+1. [서론] {topic}의 이해와 필요성
+2. [본문] {topic}의 기본 개념과 작동 원리
+3. [본문] {topic}의 실전 활용 사례
+4. [본문] {topic}과 다른 기술 비교
+5. [결론] {topic}의 미래와 학습 방향
+
+위와 같은 형식으로 소제목을 작성해주시면 됩니다.
+각 섹션에 [서론], [본문], [결론] 중 하나를 포함해주세요.""")
+            return
         
         # 소제목 형식 검증
         if not all(any(marker in s for marker in ["[서론]", "[본문]", "[결론]"]) for s in subtitles):
