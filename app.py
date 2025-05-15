@@ -569,11 +569,63 @@ def handle_input(user_input):
 
     # 소제목 확인 단계
     elif step == Step.SUBTITLE_CONFIRM.value:
-        st.session_state.collected["finalized_subtitles"] = [s.strip() for s in user_input.split("\n") if s.strip()]
-        st.session_state.step = Step.DRAFT_GENERATE.value
-        st.session_state.draft_index = 0
-        bot_say("이제 각 섹션별로 초안을 작성해드릴게요!")
-        handle_input("")  # 자동으로 첫 섹션 초안 생성 시작
+        if not user_input:
+            # 처음 이 단계에 진입했을 때
+            suggested_structure = st.session_state.collected.get("suggested_structure", "")
+            bot_say(f"""제안된 구조를 바탕으로 각 섹션의 소제목을 작성해주세요.
+
+예시 형식:
+1. [서론] Docker의 이해와 필요성
+2. [본문] Docker 기본 개념과 작동 원리
+3. [본문] Docker 실전 활용 사례
+4. [본문] Docker와 다른 컨테이너 기술 비교
+5. [결론] Docker의 미래와 학습 방향
+
+위와 같은 형식으로 각 섹션의 소제목을 작성해주세요.
+순서를 바꾸거나 섹션을 추가/삭제하셔도 됩니다.""")
+            return
+
+        # 사용자가 소제목을 입력한 경우
+        subtitles = [s.strip() for s in user_input.split("\n") if s.strip()]
+        
+        # 소제목 형식 검증
+        if not all(any(marker in s for marker in ["[서론]", "[본문]", "[결론]"]) for s in subtitles):
+            bot_say("""소제목 형식이 올바르지 않습니다. 각 섹션에 [서론], [본문], [결론] 중 하나를 포함해주세요.
+
+예시:
+1. [서론] Docker의 이해와 필요성
+2. [본문] Docker 기본 개념과 작동 원리
+3. [본문] Docker 실전 활용 사례
+4. [본문] Docker와 다른 컨테이너 기술 비교
+5. [결론] Docker의 미래와 학습 방향""")
+            return
+
+        # 소제목 확인 메시지
+        formatted_subtitles = "\n".join([f"{i+1}. {s}" for i, s in enumerate(subtitles)])
+        bot_say(f"""🧐 제가 이해한 소제목은 다음과 같습니다:
+
+{formatted_subtitles}
+
+⚙️ 이 소제목으로 진행해도 괜찮을까요?
+수정이 필요하다면 다시 작성해주세요.""")
+        
+        st.session_state.collected["finalized_subtitles"] = subtitles
+        st.session_state.step = Step.SUBTITLE_CONFIRM.value
+
+    # 소제목 확인 응답 처리
+    elif step == Step.SUBTITLE_CONFIRM.value and user_input:
+        response = is_positive_response(user_input)
+        
+        if response is True:
+            st.session_state.step = Step.DRAFT_GENERATE.value
+            st.session_state.draft_index = 0
+            bot_say("이제 각 섹션별로 초안을 작성해드릴게요!")
+            handle_input("")  # 자동으로 첫 섹션 초안 생성 시작
+        elif response is False:
+            bot_say("소제목을 다시 작성해주세요.")
+            st.session_state.step = Step.SUBTITLE_CONFIRM.value
+        else:
+            bot_say("소제목이 마음에 드시나요? 수정이 필요하다면 다시 작성해주세요.")
 
     # 초안 생성 단계
     elif step == Step.DRAFT_GENERATE.value:
