@@ -5,7 +5,7 @@ import os
 
 # Gemini API 설정
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel("gemini-pro")
+model = genai.GenerativeModel("gemini-1.5-pro")
 
 # 초기 세션 상태 설정
 def init_session():
