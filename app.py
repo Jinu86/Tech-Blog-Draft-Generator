@@ -372,7 +372,36 @@ def handle_input(user_input):
     # 주제 확인 단계
     elif step == Step.TOPIC_CONFIRM.value:
         def positive_action():
-            bot_say("좋아요! 이제 관련 키워드를 추천드릴게요.")
+            # 주제를 기반으로 키워드 추천 생성
+            topic = st.session_state.collected.get("user_topic", "")
+            prompt = f"""
+{REACT_SYSTEM_PROMPT}
+
+주제: "{topic}"
+
+위 주제와 관련된 기술 블로그에 적합한 키워드를 추천해주세요.
+다음 가이드라인을 따라주세요:
+
+1. 총 8-10개의 키워드를 추천해주세요.
+2. 키워드는 다음 카테고리를 포함하도록 해주세요:
+   - 핵심 기술/개념 (2-3개)
+   - 관련 도구/프레임워크 (2-3개)
+   - 적용 사례/활용 분야 (2개)
+   - 트렌드/이슈 (1-2개)
+3. 각 키워드는 쉼표로 구분하고, 키워드만 나열해주세요.
+4. 너무 일반적이거나 광범위한 키워드는 피해주세요.
+
+예시 형식: "Docker, Kubernetes, 컨테이너 오케스트레이션, 마이크로서비스, CI/CD, DevOps, 클라우드 네이티브, 스케일링"
+"""
+            recommended_keywords = process_model_request(prompt)
+            
+            # 키워드 추천 템플릿 사용
+            message = PROMPT_KEYWORD_QUESTION.format(
+                topic=topic,
+                recommended_keywords=recommended_keywords
+            )
+            
+            bot_say(message)
             st.session_state.step = Step.KEYWORD_QUESTION.value
             
         def negative_action():
