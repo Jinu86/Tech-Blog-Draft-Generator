@@ -360,21 +360,39 @@ def handle_input(user_input):
 
 사용자 입력: "{user_input}"
 
-위 입력을 기반으로 기술 블로그 주제를 추론해 한 문장으로 요약하고, 다음 질문 형식으로 출력:
+위 입력을 기반으로 기술 블로그 주제를 추론하고, 다음 사항을 고려하여 응답해주세요:
 
-예시:
-🧠 사용자의 입력을 바탕으로 제가 이해한 주제는 다음과 같습니다: "Postman 사용법"
-⚙️ 이 주제로 블로그를 작성하시는 게 맞을까요?
+1. 주제가 너무 광범위한 경우 (예: "React", "Python" 등):
+   - 구체적인 주제나 관점을 제안해주세요
+   - 예: "React의 컴포넌트 설계 패턴", "Python의 비동기 프로그래밍" 등
+
+2. 주제가 구체적인 경우:
+   - 이해한 내용을 정리하고 추가 정보가 필요한지 확인해주세요
+   - 예: "React의 컴포넌트 설계에 대해 다루고 싶으신 것으로 이해했습니다. 컴포넌트의 어떤 측면에 초점을 맞추고 싶으신가요?"
+
+3. 주제가 불명확한 경우:
+   - 더 자세한 정보를 요청해주세요
+   - 예: "어떤 기술이나 주제에 대해 다루고 싶으신지 좀 더 구체적으로 말씀해주시겠어요?"
+
+응답 형식:
+1. 이해한 내용 정리
+2. 필요한 경우 구체화 요청 또는 추가 정보 요청
+3. 사용자의 의도를 명확히 하기 위한 질문
 """
         inferred_text = process_model_request(prompt)
         bot_say(inferred_text)
 
     # 주제 확인 단계
     elif step == Step.TOPIC_CONFIRM.value:
-        def positive_action():
-            # 주제를 기반으로 키워드 추천 생성
-            topic = st.session_state.collected.get("user_topic", "")
-            prompt = f"""
+        # 주제가 구체화가 필요한 경우
+        if "구체" in user_input.lower() or "어떤" in user_input.lower() or "?" in user_input:
+            st.session_state.step = Step.TOPIC_QUESTION.value
+            bot_say("네, 주제를 더 구체적으로 말씀해주시면 좋겠습니다.")
+            return
+
+        # 주제가 명확한 경우
+        topic = st.session_state.collected.get("user_topic", "")
+        prompt = f"""
 {REACT_SYSTEM_PROMPT}
 
 주제: "{topic}"
@@ -393,31 +411,20 @@ def handle_input(user_input):
 
 예시 형식: "Docker, Kubernetes, 컨테이너 오케스트레이션, 마이크로서비스, CI/CD, DevOps, 클라우드 네이티브, 스케일링"
 """
-            recommended_keywords = process_model_request(prompt)
-            
-            # 키워드를 정돈된 형식으로 변환
-            keywords_list = [kw.strip() for kw in recommended_keywords.replace('"', '').split(',')]
-            formatted_keywords = '\n'.join([f"- {kw}" for kw in keywords_list])
-            
-            # 키워드 추천 템플릿 사용
-            message = PROMPT_KEYWORD_QUESTION.format(
-                topic=topic,
-                recommended_keywords=formatted_keywords
-            )
-            
-            bot_say(message)
-            st.session_state.step = Step.KEYWORD_QUESTION.value
-            
-        def negative_action():
-            bot_say("주제를 다시 말씀해주세요.")
-            st.session_state.step = Step.TOPIC_QUESTION.value
-            
-        handle_confirmation(
-            user_input, 
-            positive_action, 
-            negative_action,
-            "음, 제가 이해한 주제가 맞는지 잘 모르겠어요. 이 주제로 진행해도 괜찮을까요? 아니면 다른 주제를 원하시나요?"
+        recommended_keywords = process_model_request(prompt)
+        
+        # 키워드를 정돈된 형식으로 변환
+        keywords_list = [kw.strip() for kw in recommended_keywords.replace('"', '').split(',')]
+        formatted_keywords = '\n'.join([f"- {kw}" for kw in keywords_list])
+        
+        # 키워드 추천 템플릿 사용
+        message = PROMPT_KEYWORD_QUESTION.format(
+            topic=topic,
+            recommended_keywords=formatted_keywords
         )
+        
+        bot_say(message)
+        st.session_state.step = Step.KEYWORD_QUESTION.value
 
     # 키워드 질문 단계
     elif step == Step.KEYWORD_QUESTION.value:
