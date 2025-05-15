@@ -478,8 +478,35 @@ def handle_input(user_input):
     # 스타일 확인 단계
     elif step == Step.STYLE_CONFIRM.value:
         def positive_action():
-            bot_say("좋아요! 이제 글의 구조를 제안드릴게요.")
-            st.session_state.step = Step.STRUCTURE_SUGGEST.value
+            # 바로 구조 제안 프롬프트 생성
+            prompt = f"""
+{REACT_SYSTEM_PROMPT}
+
+주제: {st.session_state.collected.get('user_topic', '')}
+키워드: {st.session_state.collected.get('user_keywords_raw', '')}
+스타일: {st.session_state.collected.get('user_style_raw', '')}
+
+위 정보를 바탕으로 블로그의 전체 구조를 제안해주세요.
+다음 가이드라인을 따라주세요:
+
+1. 서론, 본문(2-3개 섹션), 결론의 기본 구조를 포함해주세요.
+2. 각 섹션은 명확하고 구체적인 제목을 가져야 합니다.
+3. 제목만 나열해주세요.
+4. 마지막에 "이 구조로 괜찮을까요?"라고 물어봐주세요.
+
+예시 형식:
+1. [서론] Docker의 이해와 필요성
+2. [본문] Docker 기본 개념과 작동 원리
+3. [본문] Docker 실전 활용 사례
+4. [본문] Docker와 다른 컨테이너 기술 비교
+5. [결론] Docker의 미래와 학습 방향
+
+이 구조로 괜찮을까요?
+"""
+            response_text = process_model_request(prompt)
+            st.session_state.collected["suggested_structure"] = response_text
+            st.session_state.step = Step.STRUCTURE_CONFIRM.value
+            bot_say(response_text)
             
         def negative_action():
             bot_say("스타일을 다시 입력해주세요.")
@@ -494,11 +521,8 @@ def handle_input(user_input):
 
     # 구조 제안 단계
     elif step == Step.STRUCTURE_SUGGEST.value:
-        prompt = f"주제와 키워드, 스타일을 바탕으로 블로그의 전체 구조를 제안해주세요. 각 섹션은 제목만 출력해주세요."
-        response_text = process_model_request(prompt)
-        st.session_state.collected["suggested_structure"] = response_text
-        st.session_state.step = Step.STRUCTURE_CONFIRM.value
-        bot_say(response_text + "\n\n이 구조로 괜찮을까요?")
+        # 이 단계는 이제 사용되지 않음 (스타일 확인 단계에서 바로 처리)
+        pass
 
     # 구조 확인 단계
     elif step == Step.STRUCTURE_CONFIRM.value:
@@ -507,8 +531,34 @@ def handle_input(user_input):
             st.session_state.step = Step.SUBTITLE_CONFIRM.value
             
         def negative_action():
-            bot_say("원하시는 구조를 다시 말씀해주세요.")
-            st.session_state.step = Step.STRUCTURE_SUGGEST.value
+            # 새로운 구조 제안을 위한 프롬프트 생성
+            prompt = f"""
+{REACT_SYSTEM_PROMPT}
+
+주제: {st.session_state.collected.get('user_topic', '')}
+키워드: {st.session_state.collected.get('user_keywords_raw', '')}
+스타일: {st.session_state.collected.get('user_style_raw', '')}
+
+위 정보를 바탕으로 블로그의 새로운 구조를 제안해주세요.
+다음 가이드라인을 따라주세요:
+
+1. 서론, 본문(2-3개 섹션), 결론의 기본 구조를 포함해주세요.
+2. 각 섹션은 명확하고 구체적인 제목을 가져야 합니다.
+3. 제목만 나열해주세요.
+4. 마지막에 "이 구조로 괜찮을까요?"라고 물어봐주세요.
+
+예시 형식:
+1. [서론] Docker의 이해와 필요성
+2. [본문] Docker 기본 개념과 작동 원리
+3. [본문] Docker 실전 활용 사례
+4. [본문] Docker와 다른 컨테이너 기술 비교
+5. [결론] Docker의 미래와 학습 방향
+
+이 구조로 괜찮을까요?
+"""
+            response_text = process_model_request(prompt)
+            st.session_state.collected["suggested_structure"] = response_text
+            bot_say(response_text)
             
         handle_confirmation(
             user_input, 
