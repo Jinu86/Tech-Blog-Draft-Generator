@@ -122,7 +122,7 @@ PROMPT_DRAFT_SECTION = """
 
 # Gemini 모델 불러오기
 def get_chat_model():
-    return genai.GenerativeModel("gemini-pro")
+    return genai.GenerativeModel("gemini-pro-1.5")
 
 # 상태 초기화
 if "messages" not in st.session_state:
