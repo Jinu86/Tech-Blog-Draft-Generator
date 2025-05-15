@@ -122,13 +122,33 @@ PROMPT_DRAFT_SECTION = """
 
 # Gemini 모델 불러오기
 def get_chat_model():
-    return genai.GenerativeModel("gemini-pro-1.5")
+    return genai.GenerativeModel("gemini-pro")
 
 # 상태 초기화
 if "messages" not in st.session_state:
     st.session_state.messages = []
     st.session_state.step = "topic_question"
     st.session_state.collected = {}
+    st.session_state.generated_drafts = {}
+    st.session_state.draft_index = 0
+
+# 사이드바 진행 단계 표시
+with st.sidebar:
+    st.markdown("### 🧭 진행 단계")
+    steps = [
+        ("topic", "1. 주제 입력"),
+        ("keyword", "2. 키워드 선택"),
+        ("style", "3. 스타일 설정"),
+        ("structure", "4. 구조 제안"),
+        ("subtitle", "5. 소제목 구성"),
+        ("draft", "6. 초안 작성")
+    ]
+    current_step = st.session_state.step
+    for key, label in steps:
+        if current_step.startswith(key):
+            st.markdown(f"- **✅ {label}**")
+        else:
+            st.markdown(f"- {label}")
 
 # 챗 UI
 st.title("🧠 기술 블로그 초안 생성 챗봇")
@@ -182,6 +202,96 @@ def handle_input(user_input):
         else:
             bot_say("주제를 다시 말씀해주세요.")
             st.session_state.step = "topic_question"
+
+    elif step == "keyword_question":
+        st.session_state.collected["user_keywords_raw"] = user_input
+        # 이곳에 키워드 추천 로직을 넣을 수 있음
+        st.session_state.step = "keyword_confirm"
+        prompt = f"사용자가 입력한 키워드 후보: {user_input}\n위 내용을 정리하여 GPT가 키워드 리스트로 정제하고, 확인 질문 포함한 메시지 생성"
+        response = model.generate_content(prompt)
+        bot_say(response.text)
+
+    elif step == "keyword_confirm":
+        if "네" in user_input:
+            bot_say("스타일을 정해볼게요. 문체와 대상 독자를 알려주세요.")
+            st.session_state.step = "style_question"
+        else:
+            bot_say("다시 키워드를 입력해주세요.")
+            st.session_state.step = "keyword_question"
+
+    elif step == "style_question":
+        st.session_state.collected["user_style_raw"] = user_input
+        st.session_state.step = "style_confirm"
+        prompt = f"사용자가 입력한 스타일: {user_input}\n형식, 톤, 독자대상을 정리하여 확인 메시지 생성"
+        response = model.generate_content(prompt)
+        bot_say(response.text)
+
+    elif step == "style_confirm":
+        if "네" in user_input:
+            bot_say("좋아요! 이제 글의 구조를 제안드릴게요.")
+            st.session_state.step = "structure_suggest"
+        else:
+            bot_say("스타일을 다시 입력해주세요.")
+            st.session_state.step = "style_question"
+
+    elif step == "structure_suggest":
+        prompt = f"주제와 키워드, 스타일을 바탕으로 블로그의 전체 구조를 제안해주세요. 각 섹션은 제목만 출력해주세요."
+        response = model.generate_content(prompt)
+        st.session_state.collected["suggested_structure"] = response.text
+        st.session_state.step = "structure_confirm"
+        bot_say(response.text + "\n\n이 구조로 괜찮을까요?")
+
+    elif step == "structure_confirm":
+        if "네" in user_input:
+            bot_say("좋습니다. 이제 각 소제목을 확정하겠습니다.")
+            st.session_state.step = "subtitle_confirm"
+        else:
+            bot_say("원하시는 구조를 다시 말씀해주세요.")
+            st.session_state.step = "structure_suggest"
+
+    elif step == "subtitle_confirm":
+        st.session_state.collected["finalized_subtitles"] = [s.strip() for s in user_input.split("\n") if s.strip()]
+        st.session_state.step = "draft_generate"
+        st.session_state.draft_index = 0
+        bot_say("이제 각 섹션별로 초안을 작성해드릴게요!")
+        handle_input("")  # 자동으로 첫 섹션 초안 생성 시작
+
+    elif step == "draft_generate":
+        subtitles = st.session_state.collected.get("finalized_subtitles", [])
+        index = st.session_state.draft_index
+
+        if index >= len(subtitles):
+            st.session_state.step = "done"
+            bot_say("✅ 모든 초안 작성을 완료했어요! 필요한 경우 다시 수정하거나 복사해서 사용하세요.")
+            return
+
+        current_section = subtitles[index]
+        prompt = f"{REACT_SYSTEM_PROMPT}\n\n주제: {st.session_state.collected.get('user_topic')}\n문체/스타일: {st.session_state.collected.get('user_style_raw')}\n\n✍️ 아래 소제목에 대한 블로그 글 초안을 작성해주세요:\n제목: {current_section}"
+        
+        try:
+            response = model.generate_content(prompt)
+            st.session_state.generated_drafts[current_section] = response.text
+            st.session_state.step = "draft_confirm"
+            bot_say(f"✍️ 섹션 \"**{current_section}**\"의 초안입니다:\n\n{response.text}\n\n이 내용 괜찮으신가요? 수정하거나 다시 작성하고 싶으면 말씀해주세요.")
+        except Exception as e:
+            bot_say(f"초안 생성 중 오류가 발생했습니다: {str(e)}")
+            st.session_state.step = "subtitle_confirm"
+
+    elif step == "draft_confirm":
+        if "네" in user_input:
+            st.session_state.draft_index += 1
+            st.session_state.step = "draft_generate"
+            handle_input("")  # 다음 섹션 자동 호출
+        else:
+            current_section = list(st.session_state.generated_drafts.keys())[st.session_state.draft_index]
+            prompt = f"다시 작성해주세요. 제목: {current_section}, 사용자 요청: {user_input}"
+            
+            try:
+                response = model.generate_content(prompt)
+                st.session_state.generated_drafts[current_section] = response.text
+                bot_say(f"🔁 다시 작성한 초안입니다:\n\n{response.text}\n\n이제 괜찮으신가요?")
+            except Exception as e:
+                bot_say(f"초안 수정 중 오류가 발생했습니다: {str(e)}")
 
 # 첫 질문 표시
 if not st.session_state.messages:
