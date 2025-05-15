@@ -1,214 +1,191 @@
 import streamlit as st
 import google.generativeai as genai
 import os
-from google.api_core.exceptions import GoogleAPIError
+from dotenv import load_dotenv
 
-#--- 환경 변수 설정 ---
-API_KEY = os.getenv("GEMINI_API_KEY") or st.secrets.get("GEMINI_API_KEY")
-if not API_KEY:
-    st.error("GEMINI API 키가 설정되지 않았습니다. 설정 후 다시 실행해주세요.")
-    st.stop()
+# 환경 변수 로드
+load_dotenv()
 
-# Gemini API 구성
-genai.configure(api_key=API_KEY)
-MODEL = "gemini-pro-1.5"
+# Gemini API 키 설정
+genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
 
-# 페이지 설정
-st.set_page_config(
-    page_title="기술 블로그 초안 생성 챗봇",
-    page_icon="📝",
-    layout="wide"
-)
+# 시스템 프롬프트
+REACT_SYSTEM_PROMPT = """
+당신은 기술 블로그 작성을 도와주는 챗봇입니다.
+당신은 ReAct 방식(Reasoning + Acting)을 사용합니다.
+각 단계에서 사용자의 입력을 해석하고, 당신이 이해한 내용이 맞는지 다시 물어본 후 사용자 확인을 받은 다음에만 다음 단계로 넘어갑니다.
 
-# 진행 단계 정의
-STEPS = [
-    "주제 입력", "주제 확인", "키워드 입력", "키워드 확인",  
-    "스타일 입력", "스타일 확인", "구조 입력", "구조 확인",  
-    "소제목 입력", "소제목 확인", "섹션 작성", "최종 검토"
-]
+사용자 입력이 모호하거나 불명확할 경우 반드시 명확하게 다시 물어보세요.
+사용자의 의도를 스스로 판단하지 말고, 반드시 확인하세요.
 
-# 세션 초기화
-if 'state' not in st.session_state:
-    st.session_state.state = 'ask_topic'
-    st.session_state.history = []
-    st.session_state.data = {
-        'topic': '', 'keywords': [], 'style': '', 'structure': '',
-        'subtitles': [], 'current_idx': 0, 'drafts': []
-    }
-    # 첫 인사 및 서비스 소개
-    intro = (
-        "안녕하세요! 저는 기술 블로그 초안 작성 도우미 챗봇입니다.\n"
-        "어떤 주제로 블로그를 작성하고 싶으신가요?"
-    )
-    st.session_state.history.append({'role':'assistant','content':intro})
+진행 순서는 다음과 같습니다:
+1. [주제 파악]
+2. [키워드 추천 및 선택]
+3. [문체/대상 스타일 선택]
+4. [글의 구조 제안 및 확정]
+5. [소제목 및 흐름 구성]
+6. [초안 작성]
 
-# 사이드바에 진행 단계 표시
-with st.sidebar:
-    st.title("진행 단계")
-    current_step = {
-        'ask_topic':"주제 입력", 'confirm_topic':"주제 확인",
-        'ask_keywords':"키워드 입력", 'confirm_keywords':"키워드 확인",
-        'ask_style':"스타일 입력", 'confirm_style':"스타일 확인",
-        'ask_structure':"구조 입력", 'confirm_structure':"구조 확인",
-        'ask_subtitles':"소제목 입력", 'confirm_subtitles':"소제목 확인",
-        'write_section':"섹션 작성", 'final_review':"최종 검토"
-    }.get(st.session_state.state, None)
-    for step in STEPS:
-        if step == current_step:
-            st.markdown(f"**➡️ {step}**")
+각 단계에서는 다음과 같은 패턴을 따르세요:
+- 🧐 Reasoning: 사용자의 입력을 바탕으로 당신이 이해한 내용을 정리합니다.
+- ⚙️ Acting: 이해한 내용을 사용자에게 보여주고, 맞는지 물어봅니다.
+- ✅ 사용자 확인 이후에만 다음 단계로 진행하세요.
+"""
+
+# 단계별 프롬프트 템플릿
+PROMPT_TOPIC_QUESTION = """
+안녕하세요! 저는 기술 블로그 초안 작성을 도와드리는 챗봇입니다. 😊
+먼저, 어떤 주제로 블로그를 작성하고 싶으신가요?
+간단히 말씀해 주세요.
+"""
+
+PROMPT_TOPIC_CONFIRM = """
+🧐 사용자의 답변을 바탕으로 제가 이해한 주제는 다음과 같습니다:  
+**"{inferred_topic}"**
+
+⚙️ 이 주제로 블로그를 작성하시는 게 맞을까요?
+맞으면 \"네\", 아니면 다시 말씀해주세요.
+"""
+
+PROMPT_KEYWORD_QUESTION = """
+주제 \"**{topic}**\"와 관련해서 아래와 같은 키워드를 추천드려요:
+
+🔎 추천 키워드:
+{recommended_keywords}
+
+이 중에서 다루고 싶은 키워드를 **복수로 선택**해주시고,
+추천 키워드에 없더라도 추가하고 싶은 키워드가 있다면 자유롭게 말씀해주세요!
+예: \"API, Mock 서버, 실습 예제\"
+"""
+
+PROMPT_KEYWORD_CONFIRM = """
+🧐 제가 이해한 최종 키워드는 다음과 같습니다:  
+{selected_keywords}
+
+⚙️ 이 키워드를 중심으로 글을 작성해도 괜찮을까요?
+수정하거나 추가하고 싶은 키워드가 있다면 알려주세요!
+"""
+
+PROMPT_STYLE_QUESTION = """
+이번엔 블로그의 스타일을 정해볼게요.
+아래는 참고할 수 있는 예시입니다:
+
+- 형식: 튜토리얼, 기술 리뷰, 문제 해결 사례
+- 문체: 친근한, 공식적인, 중립적
+- 독자 대상: 초보자, 중급 개발자, 전문가
+
+예시에서 골라도 좋고, 자유롭게 원하는 스타일로 작성해주셔도 괜찮습니다.
+예: \"튜토리얼 형식, 친근한 톤, 초보자 대상\"
+"""
+
+PROMPT_STYLE_CONFIRM = """
+🧐 제가 이해한 스타일은 다음과 같습니다:
+
+- 형식: **{format_style}**
+- 문체: **{tone}**
+- 대상 독자: **{audience}**
+
+⚙️ 이 스타일로 글을 작성해도 괜찮을까요?
+자유롭게 수정하거나 추가하고 싶은 요소가 있다면 말씀해주세요.
+"""
+
+PROMPT_STRUCTURE_SUGGEST = """
+위의 주제, 키워드, 스타일을 바탕으로 아래와 같은 글 구조를 제안드려요:
+
+📝 제안된 구조:
+{suggested_structure}
+
+⚙️ 이 구조는 참고용이니, 마음껏 수정하셔도 좋아요!
+섹션을 추가하거나 순서를 바꾸고 싶으시면 알려주세요.
+"""
+
+PROMPT_SUBTITLES_CONFIRM = """
+아래는 각 섹션의 소제목입니다:
+
+📌 소제목 목록:
+{finalized_subtitles}
+
+⚙️ 이 흐름대로 글을 작성해도 괜찮을까요?
+수정하거나 추가하고 싶은 항목이 있다면 말씀해주세요!
+"""
+
+PROMPT_DRAFT_SECTION = """
+✍️ 섹션 \"**{section_title}**\"에 대해 다음과 같은 초안을 작성해봤어요:
+
+```
+{generated_content}
+```
+
+⚙️ 괜찮으신가요?
+내용을 바꾸고 싶거나, 더 추가하고 싶은 내용이 있다면 알려주세요!
+"""
+
+# Gemini 모델 불러오기
+def get_chat_model():
+    return genai.GenerativeModel("gemini-pro-1.5")
+
+# 상태 초기화
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+    st.session_state.step = "topic_question"
+    st.session_state.collected = {}
+
+# 챗 UI
+st.title("🧠 기술 블로그 초안 생성 챗봇")
+st.markdown("---")
+
+# 메시지 출력
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+# 챗봇 메시지 전송 함수
+def bot_say(message):
+    st.session_state.messages.append({"role": "assistant", "content": message})
+    with st.chat_message("assistant"):
+        st.markdown(message)
+
+# 사용자 메시지 처리 함수
+def user_say():
+    user_input = st.chat_input("메시지를 입력하세요")
+    if user_input:
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        with st.chat_message("user"):
+            st.markdown(user_input)
+        handle_input(user_input)
+
+# 단계별 처리 로직
+def handle_input(user_input):
+    step = st.session_state.step
+    model = get_chat_model()
+
+    if step == "topic_question":
+        st.session_state.step = "topic_confirm"
+        st.session_state.collected["user_topic"] = user_input
+
+        prompt = f"""
+{REACT_SYSTEM_PROMPT}
+
+사용자 입력: "{user_input}"
+
+위 입력을 기반으로 기술 블로그 주제를 추론해 한 문장으로 요약하고, 다음 질문 형식으로 출력:
+\n\n예시: \n🧠 사용자의 입력을 바탕으로 제가 이해한 주제는 다음과 같습니다: \"Postman 사용법\"\n⚙️ 이 주제로 블로그를 작성하시는 게 맞을까요?
+"""
+        response = model.generate_content(prompt)
+        inferred_text = response.text
+        bot_say(inferred_text)
+
+    elif step == "topic_confirm":
+        if "네" in user_input:
+            bot_say("좋아요! 이제 관련 키워드를 추천드릴게요.")
+            st.session_state.step = "keyword_question"
         else:
-            st.markdown(step)
+            bot_say("주제를 다시 말씀해주세요.")
+            st.session_state.step = "topic_question"
 
-# 내부 함수: 메시지 추가 및 API 호출
-def add_user_message(msg):
-    st.session_state.history.append({'role': 'user', 'content': msg})
+# 첫 질문 표시
+if not st.session_state.messages:
+    bot_say(PROMPT_TOPIC_QUESTION)
 
-def add_bot_message(msg):
-    st.session_state.history.append({'role': 'assistant', 'content': msg})
-
-# Gemini 호출
-def chat_with_gemini(prompt):
-    try:
-        resp = genai.ChatCompletion.create(
-            model=MODEL,
-            messages=[m for m in st.session_state.history] + [{'role': 'user', 'content': prompt}]
-        )
-        return resp.choices[0].message['content']
-    except GoogleAPIError as e:
-        error_msg = f"API 호출 중 오류가 발생했습니다: {e.message}"
-        add_bot_message(error_msg)
-        return error_msg
-    except Exception as e:
-        error_msg = f"알 수 없는 오류가 발생했습니다: {str(e)}"
-        add_bot_message(error_msg)
-        return error_msg
-
-# 대화 렌더링
-for chat in st.session_state.history:
-    if chat['role'] == 'user':
-        st.chat_message('user').write(chat['content'])
-    else:
-        st.chat_message('assistant').write(chat['content'])
-
-# 사용자 입력 받기
-user_input = st.chat_input('')
-if user_input:
-    add_user_message(user_input)
-    # 상태 기반 대화 흐름
-    if st.session_state.state == 'ask_topic':
-        bot = f"(🤔 주제 파악 중…) '{user_input}'이 맞나요?"
-        add_bot_message(bot)
-        st.session_state.state = 'confirm_topic'
-
-    elif st.session_state.state == 'confirm_topic':
-        if '네' in user_input:
-            add_bot_message("좋아요! 키워드를 추천해드릴게요.")
-            st.session_state.state = 'ask_keywords'
-        else:
-            add_bot_message("그럼 다시 주제를 말씀해주세요.")
-            st.session_state.state = 'ask_topic'
-
-    elif st.session_state.state == 'ask_keywords':
-        add_bot_message("(🤔 키워드 고민 중…)")
-        rec = chat_with_gemini(f"주제: {st.session_state.data['topic']}에 적합한 키워드를 추천해주세요.")
-        add_bot_message(rec)
-        add_bot_message("추천 키워드를 기반으로, 원하시는 키워드를 쉼표로 입력해주세요.")
-        st.session_state.state = 'confirm_keywords'
-
-    elif st.session_state.state == 'confirm_keywords':
-        kws = [k.strip() for k in user_input.split(',')]
-        st.session_state.data['keywords'] = kws
-        bot = f"(🤔 키워드 확인…) 선택하신 키워드: {', '.join(kws)} 이 맞나요?"
-        add_bot_message(bot)
-        st.session_state.state = 'confirm_keywords_pending'
-
-    elif st.session_state.state == 'confirm_keywords_pending':
-        if '네' in user_input:
-            add_bot_message("좋습니다. 스타일을 알려주세요 (초심자용, 실무자용, 발표용).")
-            st.session_state.state = 'ask_style'
-        else:
-            add_bot_message("다시 키워드를 입력해주세요.")
-            st.session_state.state = 'ask_keywords'
-
-    elif st.session_state.state == 'ask_style':
-        st.session_state.data['style'] = user_input
-        bot = f"(🤔 스타일 확인…) '{user_input}' 스타일로 진행할까요?"
-        add_bot_message(bot)
-        st.session_state.state = 'confirm_style'
-
-    elif st.session_state.state == 'confirm_style':
-        if '네' in user_input:
-            add_bot_message("구조를 알려주세요. 예: 서론-목차-본문-결론")
-            st.session_state.state = 'ask_structure'
-        else:
-            add_bot_message("다시 스타일을 입력해주세요.")
-            st.session_state.state = 'ask_style'
-
-    elif st.session_state.state == 'ask_structure':
-        st.session_state.data['structure'] = user_input
-        bot = f"(🤔 구조 확인…) '{user_input}' 구조로 진행합니다."
-        add_bot_message(bot)
-        st.session_state.state = 'confirm_structure'
-
-    elif st.session_state.state == 'confirm_structure':
-        if '네' in user_input:
-            add_bot_message("소제목을 추천해드릴게요.")
-            st.session_state.state = 'ask_subtitles'
-        else:
-            add_bot_message("다시 구조를 입력해주세요.")
-            st.session_state.state = 'ask_structure'
-
-    elif st.session_state.state == 'ask_subtitles':
-        subs = [s.strip() for s in user_input.split(',')]
-        st.session_state.data['subtitles'] = subs
-        bot = f"(🤔 소제목 확인…) 입력하신 소제목: {', '.join(subs)}"
-        add_bot_message(bot)
-        add_bot_message("'준비 완료'라고 입력하시면 본문 생성으로 넘어갑니다.")
-        st.session_state.state = 'confirm_subtitles'
-
-    elif st.session_state.state == 'confirm_subtitles':
-        if '준비 완료' in user_input:
-            add_bot_message("본문을 생성합니다…")
-            st.session_state.state = 'write_section'
-        else:
-            add_bot_message("다시 소제목을 입력해주세요.")
-            st.session_state.state = 'ask_subtitles'
-
-    elif st.session_state.state == 'write_section':
-        idx = st.session_state.data['current_idx']
-        section = st.session_state.data['subtitles'][idx]
-        draft = chat_with_gemini(f"섹션: {section}에 대해 작성해주세요.")
-        add_bot_message(f"**{section}**\n{draft}")
-        add_bot_message("수정할 부분이 있으면 작성해주세요. 없으면 '다음'이라고 입력해주세요.")
-        st.session_state.state = 'edit_section'
-
-    elif st.session_state.state == 'edit_section':
-        if '다음' not in user_input:
-            section = st.session_state.data['subtitles'][st.session_state.data['current_idx']]
-            draft = chat_with_gemini(f"{section} 섹션을 이렇게 수정해주세요: {user_input}")
-            add_bot_message(f"**{section}**\n{draft}")
-            st.session_state.data['drafts'].append(draft)
-        else:
-            st.session_state.data['drafts'].append(chat_with_gemini(""))
-        st.session_state.data['current_idx'] += 1
-        if st.session_state.data['current_idx'] < len(st.session_state.data['subtitles']):
-            add_bot_message("다음 섹션으로 넘어갑니다.")
-            st.session_state.state = 'write_section'
-        else:
-            add_bot_message("모든 섹션이 완료되었습니다. 전체 검토로 넘어갑니다.")
-            st.session_state.state = 'final_review'
-
-    elif st.session_state.state == 'final_review':
-        add_bot_message("(🤔 전체 초안 완성!) 아래는 전체 초안입니다:")
-        for sec, text in zip(st.session_state.data['subtitles'], st.session_state.data['drafts']):
-            add_bot_message(f"**{sec}**\n{text}")
-        add_bot_message("수정할 구역이나 포맷 변경을 자유롭게 입력해주세요.")
-        st.session_state.state = 'final_edit'
-
-    elif st.session_state.state == 'final_edit':
-        result = chat_with_gemini(f"전체 초안을 다음과 같이 처리해주세요: {user_input}")
-        add_bot_message(result)
-        st.balloons()
-
-    # 리렌더링
-    st.experimental_rerun()
+# 사용자 입력 대기
+user_say()
