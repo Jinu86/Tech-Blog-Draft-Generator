@@ -72,6 +72,7 @@ def run_app():
     st.divider()
 
     if prompt := st.chat_input("답변을 입력하세요..."):
+        st.chat_message("user").write(prompt)
         st.session_state.user_input = prompt
         st.rerun()
 
