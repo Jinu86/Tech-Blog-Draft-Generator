@@ -31,7 +31,6 @@ genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
 # 시스템 프롬프트
 REACT_SYSTEM_PROMPT = """
 당신은 기술 블로그 작성을 도와주는 챗봇입니다.
-당신은 ReAct 방식(Reasoning + Acting)을 사용합니다.
 각 단계에서 사용자의 입력을 해석하고, 당신이 이해한 내용이 맞는지 다시 물어본 후 사용자 확인을 받은 다음에만 다음 단계로 넘어갑니다.
 
 사용자 입력이 모호하거나 불명확할 경우 반드시 명확하게 다시 물어보세요.
@@ -41,14 +40,10 @@ REACT_SYSTEM_PROMPT = """
 1. [주제 파악]
 2. [키워드 추천 및 선택]
 3. [문체/대상 스타일 선택]
-4. [글의 구조 제안 및 확정]
-5. [소제목 및 흐름 구성]
-6. [초안 작성]
-
-각 단계에서는 다음과 같은 패턴을 따르세요:
-- 🧐 Reasoning: 사용자의 입력을 바탕으로 당신이 이해한 내용을 정리합니다.
-- ⚙️ Acting: 이해한 내용을 사용자에게 보여주고, 맞는지 물어봅니다.
-- ✅ 사용자 확인 이후에만 다음 단계로 진행하세요.
+4. [글의 흐름 제안 및 확정]
+5. [도입부 작성 및 확정]
+6. [각 섹션 작성 및 확정]
+7. [전체 초안 보기]
 
 기술 블로그 작성 시 다음 지침을 따르세요:
 1. 기술적 정확성: 모든 기술 정보와 개념 설명은 정확해야 합니다.
@@ -129,7 +124,7 @@ PROMPT_FLOW_SUGGEST = """
 PROMPT_FLOW_CONFIRM = """
 아래는 각 섹션의 흐름입니다:
 
-📌 흐름 목록:
+흐름 목록:
 {finalized_flow}
 
 이 흐름대로 글을 작성해도 괜찮을까요?
@@ -257,7 +252,7 @@ def show_full_draft():
     
     # 전체 초안 표시
     st.session_state.step = Step.DONE.value
-    bot_say(f"✅ 모든 초안 작성을 완료했어요! 아래는 전체 초안입니다:")
+    bot_say(f"모든 초안 작성을 완료했어요! 아래는 전체 초안입니다:")
     
     # 복사 가능한 코드 블록으로 전체 초안 표시
     with st.expander("📋 전체 초안 (클릭하여 복사하기)", expanded=True):
@@ -281,7 +276,7 @@ with st.sidebar:
     current_step = st.session_state.step
     for key, label in steps:
         if current_step.startswith(key):
-            st.markdown(f"- **✅ {label}**")
+            st.markdown(f"- **{label}**")
         else:
             st.markdown(f"- {label}")
 
@@ -590,7 +585,7 @@ def handle_input(user_input):
             return
             
         # 응답이 명확하지 않은 경우
-        bot_say("""스타일에 대해 어떻게 생각하시나요?
+        bot_say("""흐름에 대해 어떻게 생각하시나요?
 - 진행하시려면 '네', '좋아요', '진행할게요'라고 말씀해주세요.
 - 수정이 필요하시다면 '수정', '다시', '바꿔' 등의 말씀을 해주세요.""")
 
@@ -698,7 +693,7 @@ def handle_input(user_input):
             st.session_state.step = Step.INTRO_CONFIRM.value
             
             # 섹션 표시 및 수정 UI
-            bot_say(f"✍️ 도입부 \"{intro_section}\"의 초안입니다:")
+            bot_say(f"도입부 \"{intro_section}\"의 초안입니다:")
             
             # 문장 단위로 분리하여 각 문장에 수정 버튼 추가
             paragraphs = response_text.split("\n\n")
@@ -735,7 +730,7 @@ def handle_input(user_input):
             formatted_content = ""
             for p_idx, paragraph in enumerate(paragraphs):
                 if paragraph.strip():
-                    formatted_content += f"📝 문단 {p_idx+1}:\n{paragraph}\n\n"
+                    formatted_content += f"문단 {p_idx+1}:\n{paragraph}\n\n"
             
             bot_say(formatted_content + "\n\n수정하고 싶은 문단 번호와 수정 내용을 알려주세요. 예: '문단 1: 수정할 내용...'")
             st.session_state.editing_mode = True
@@ -811,14 +806,14 @@ def handle_input(user_input):
             st.session_state.generated_drafts[current_section] = response_text
             
             # 섹션 표시 및 수정 UI
-            bot_say(f"✍️ 섹션 \"{current_section}\"의 초안입니다:")
+            bot_say(f"섹션 \"{current_section}\"의 초안입니다:")
             
             # 문단 단위로 분리하여 각 문단에 수정 버튼 추가
             paragraphs = response_text.split("\n\n")
             formatted_content = ""
             for p_idx, paragraph in enumerate(paragraphs):
                 if paragraph.strip():
-                    formatted_content += f"📝 문단 {p_idx+1}:\n{paragraph}\n\n"
+                    formatted_content += f"문단 {p_idx+1}:\n{paragraph}\n\n"
             
             bot_say(formatted_content + "\n\n이 섹션 내용이 괜찮으신가요? 수정이 필요하면 '수정'이라고 말씀해주세요.")
             st.session_state.step = Step.SECTION_CONFIRM.value
@@ -826,170 +821,6 @@ def handle_input(user_input):
         
         # 응답이 명확하지 않은 경우
         bot_say("""도입부 내용에 대해 어떻게 생각하시나요?
-- 진행하시려면 '네', '좋아요', '진행할게요'라고 말씀해주세요.
-- 수정이 필요하시다면 '수정', '다시', '바꿔' 등의 말씀을 해주세요.""")
-
-    # 섹션 확인 단계
-    elif step == Step.SECTION_CONFIRM.value:
-        user_input_lower = user_input.lower()
-        
-        # 편집 모드인 경우 수정 적용
-        if hasattr(st.session_state, 'editing_mode') and st.session_state.editing_mode:
-            subtitles = st.session_state.collected.get("finalized_flow", [])
-            current_section = subtitles[st.session_state.current_section_index]
-            
-            # 현재 내용 가져오기
-            content = st.session_state.generated_drafts.get(current_section, "")
-            paragraphs = content.split("\n\n")
-            
-            # 문단 번호 추출
-            paragraph_num = -1
-            for num in range(1, len(paragraphs) + 1):
-                if f"문단 {num}" in user_input_lower or f"문단{num}" in user_input_lower:
-                    paragraph_num = num - 1
-                    break
-            
-            if paragraph_num >= 0 and paragraph_num < len(paragraphs):
-                # 수정 내용 추출 (문단 번호 제외)
-                parts = user_input.split(":", 1)
-                if len(parts) > 1:
-                    new_content = parts[1].strip()
-                    # 해당 문단 수정
-                    paragraphs[paragraph_num] = new_content
-                    
-                    # 수정된 내용 업데이트
-                    updated_content = "\n\n".join([p for p in paragraphs if p.strip()])
-                    st.session_state.generated_drafts[current_section] = updated_content
-                    
-                    # 수정된 섹션 표시
-                    bot_say(f"✅ 문단 {paragraph_num + 1}을 수정했습니다. 수정된 내용은 다음과 같습니다:")
-                    
-                    # 문단 단위로 분리하여 표시
-                    formatted_content = ""
-                    for p_idx, paragraph in enumerate(paragraphs):
-                        if paragraph.strip():
-                            formatted_content += f"📝 문단 {p_idx+1}:\n{paragraph}\n\n"
-                    
-                    bot_say(formatted_content + "\n\n다른 문단도 수정하시겠어요? 아니면 '계속'이라고 말씀해주세요.")
-                    return
-            
-            # 문단 번호를 찾지 못했거나 계속 진행하려는 경우
-            if "계속" in user_input_lower or "다음" in user_input_lower or "진행" in user_input_lower:
-                st.session_state.editing_mode = False
-                bot_say("수정을 완료했습니다. 다음으로 진행하시겠어요?")
-                return
-            
-            # 수정 요청이 명확하지 않은 경우
-            bot_say("어떤 문단을 수정하고 싶으신가요? '문단 번호: 수정할 내용'의 형식으로 입력해주세요. 예: '문단 2: 여기에 새로운 내용'")
-            return
-        
-        # 수정 요청이 있는지 확인
-        if any(word in user_input_lower for word in ["수정", "바꿔", "다시", "다른", "변경", "고치", "아니"]):
-            subtitles = st.session_state.collected.get("finalized_flow", [])
-            current_section = subtitles[st.session_state.current_section_index]
-            
-            # 수정 UI 제공
-            bot_say(f"섹션 \"{current_section}\"를 수정하겠습니다. 어떤 부분을 수정하고 싶으신가요?")
-            
-            # 현재 내용 표시
-            content = st.session_state.generated_drafts.get(current_section, "")
-            
-            # 문단 단위로 수정 UI 제공
-            paragraphs = content.split("\n\n")
-            formatted_content = ""
-            for p_idx, paragraph in enumerate(paragraphs):
-                if paragraph.strip():
-                    formatted_content += f"📝 문단 {p_idx+1}:\n{paragraph}\n\n"
-            
-            bot_say(formatted_content + "\n\n수정하고 싶은 문단 번호와 수정 내용을 알려주세요. 예: '문단 1: 수정할 내용...'")
-            st.session_state.editing_mode = True
-            return
-        
-        # 진행 의사가 있는지 확인
-        if any(word in user_input_lower for word in ["네", "좋아", "괜찮", "진행", "시작", "다음"]):
-            # 다음 섹션으로 이동
-            subtitles = st.session_state.collected.get("finalized_flow", [])
-            st.session_state.current_section_index += 1
-            
-            if st.session_state.current_section_index >= len(subtitles):
-                # 모든 섹션을 완료했으면 전체 초안 표시
-                st.session_state.step = Step.FULL_DRAFT.value
-                show_full_draft()
-                return
-            
-            # 다음 섹션 작성
-            current_section = subtitles[st.session_state.current_section_index]
-            topic = st.session_state.collected.get('user_topic', '')
-            keywords = st.session_state.collected.get('user_keywords_raw', '')
-            style = st.session_state.collected.get('user_style_raw', '')
-            
-            # 이전 섹션 내용 수집
-            previous_sections = ""
-            for i in range(st.session_state.current_section_index):
-                prev_title = subtitles[i]
-                prev_content = st.session_state.generated_drafts.get(prev_title, "")
-                previous_sections += f"## {prev_title}\n{prev_content}\n\n"
-            
-            # 현재 섹션이 결론인지 확인
-            if "[결론]" in current_section:
-                prompt = f"""
-{REACT_SYSTEM_PROMPT}
-
-이 글의 결론 부분인 "{current_section}"에 대한 초안을 작성해주세요.
-
-다음 요소를 포함해주세요:
-1. 글에서 다룬 핵심 내용 요약
-2. 주요 시사점 또는 교훈
-3. 독자가 다음으로 탐색할 수 있는 관련 주제 제안
-4. 독자의 행동을 유도하는 마무리
-
-이전 섹션 내용을 참고하여 일관성을 유지하세요:
-{previous_sections}
-
-주제: {topic}
-키워드: {keywords}
-스타일: {style}
-"""
-            else:
-                # 본문 섹션
-                prompt = f"""
-{REACT_SYSTEM_PROMPT}
-
-이 글의 본문 부분인 "{current_section}"에 대한 초안을 작성해주세요.
-
-다음 요소를 포함해주세요:
-1. 해당 섹션의 핵심 개념 설명
-2. 실제 작동하는 코드 예제와 설명
-3. 다른 접근법과의 비교 분석
-4. 실무 적용 사례 또는 예시
-
-이전 섹션 내용을 참고하여 일관성을 유지하세요:
-{previous_sections}
-
-주제: {topic}
-키워드: {keywords}
-스타일: {style}
-"""
-            
-            response_text = process_model_request(prompt)
-            st.session_state.generated_drafts[current_section] = response_text
-            
-            # 섹션 표시 및 수정 UI
-            bot_say(f"✍️ 섹션 \"{current_section}\"의 초안입니다:")
-            
-            # 문단 단위로 분리하여 각 문단에 수정 버튼 추가
-            paragraphs = response_text.split("\n\n")
-            formatted_content = ""
-            for p_idx, paragraph in enumerate(paragraphs):
-                if paragraph.strip():
-                    formatted_content += f"📝 문단 {p_idx+1}:\n{paragraph}\n\n"
-            
-            bot_say(formatted_content + "\n\n이 섹션 내용이 괜찮으신가요? 수정이 필요하면 '수정'이라고 말씀해주세요.")
-            st.session_state.step = Step.SECTION_CONFIRM.value
-            return
-        
-        # 응답이 명확하지 않은 경우
-        bot_say("""섹션 내용에 대해 어떻게 생각하시나요?
 - 진행하시려면 '네', '좋아요', '진행할게요'라고 말씀해주세요.
 - 수정이 필요하시다면 '수정', '다시', '바꿔' 등의 말씀을 해주세요.""")
 
