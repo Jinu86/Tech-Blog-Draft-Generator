@@ -232,31 +232,44 @@ def get_chat_model():
 
 # 전체 초안 표시 함수
 def show_full_draft():
-    subtitles = st.session_state.collected.get("finalized_flow", [])
-    full_draft = ""
-    
-    # 제목 생성
-    topic = st.session_state.collected.get('user_topic', '')
-    full_draft += f"# {topic}\n\n"
-    
-    # 각 섹션 내용 합치기
-    for subtitle in subtitles:
-        content = st.session_state.generated_drafts.get(subtitle, "")
-        full_draft += f"## {subtitle}\n{content}\n\n"
-    
-    # 전체 초안을 세션 상태에 저장
-    st.session_state.full_draft = full_draft
-    
-    # 전체 초안 표시
-    st.session_state.step = Step.DONE.value
-    bot_say(f"모든 초안 작성을 완료했어요! 아래는 전체 초안입니다:")
-    
-    # 복사 가능한 코드 블록으로 전체 초안 표시
-    with st.expander("📋 전체 초안 (클릭하여 복사하기)", expanded=True):
-        st.code(full_draft, language="markdown")
-        st.info("위 코드 블록을 클릭하면 전체 내용을 복사할 수 있습니다.")
-    
-    bot_say("필요한 경우 수정하거나 복사해서 사용하세요. '전체 초안 보기'라고 입력하시면 언제든지 다시 볼 수 있습니다.")
+    """전체 초안을 생성하고 표시하는 함수"""
+    try:
+        # 필수 데이터 검증
+        if not st.session_state.collected.get("finalized_flow") or not st.session_state.collected.get("user_topic"):
+            bot_say("죄송합니다. 아직 모든 섹션이 완성되지 않았어요. 각 섹션을 순서대로 작성해주세요.")
+            return
+
+        # 제목 생성
+        title_prompt = f"다음 주제에 대한 기술 블로그 제목을 생성해주세요: {st.session_state.collected['user_topic']}"
+        title = process_model_request(title_prompt)
+        if not title:
+            title = st.session_state.collected['user_topic']
+
+        # 전체 초안 생성
+        full_draft = f"# {title}\n\n"
+        for section_title in st.session_state.collected["finalized_flow"]:
+            section_content = st.session_state.generated_drafts.get(section_title)
+            if not section_content:
+                bot_say(f"'{section_title}' 섹션의 내용이 없습니다. 모든 섹션을 작성해주세요.")
+                return
+            full_draft += f"## {section_title}\n{section_content}\n\n"
+
+        # 초안 저장 및 표시
+        st.session_state.full_draft = full_draft
+        st.session_state.step = Step.DONE.value
+        
+        bot_say("전체 초안이 완성되었습니다!")
+        with st.expander("📋 전체 초안 (클릭하여 복사하기)", expanded=True):
+            st.code(full_draft, language="markdown")
+            st.info("위 코드 블록을 클릭하면 전체 내용을 복사할 수 있습니다.")
+        
+        bot_say("""이제 블로그 작성이 완료되었습니다! 
+- 전체 초안은 위의 확장 패널에서 확인하실 수 있습니다.
+- 언제든지 '전체 초안'이라고 입력하시면 다시 볼 수 있습니다.
+- 새로운 블로그를 작성하시려면 페이지를 새로고침해주세요.""")
+    except Exception as e:
+        st.error(f"전체 초안 생성 중 오류가 발생했습니다: {str(e)}")
+        bot_say("죄송합니다. 전체 초안을 생성하는 중에 문제가 발생했습니다. 다시 시도해주세요.")
 
 # 챗봇 메시지 전송 함수
 def bot_say(message):
@@ -307,20 +320,9 @@ def handle_input(user_input):
         if any(word in user_input_lower for word in ["수정", "바꿔", "다시", "다른", "변경", "고치", "아니"]):
             section_title = st.session_state.current_section
             original_draft = st.session_state.draft_section_content
-            prompt = PROMPT_REVISION.format(
-                section_title=section_title,
-                user_request=user_input,
-                original_draft=original_draft,
-                previous_sections="",
-                topic=st.session_state.collected.get('user_topic', ''),
-                keywords=", ".join(st.session_state.collected.get('user_keywords', [])),
-                style=f"{st.session_state.collected.get('format_style', '')} / {st.session_state.collected.get('tone', '')} / {st.session_state.collected.get('audience', '')}"
-            )
-            bot_say("네, 도입부를 수정해볼게요...")
-            revised_content = process_model_request(prompt)
-            st.session_state.draft_section_content = revised_content
-            confirm_message = PROMPT_INTRO_CONFIRM.format(intro_content=revised_content)
-            bot_say(confirm_message)
+            if handle_section_revision(section_title, user_input, original_draft):
+                confirm_message = PROMPT_INTRO_CONFIRM.format(intro_content=st.session_state.draft_section_content)
+                bot_say(confirm_message)
             return
             
         # 진행 의사가 있는지 확인
@@ -504,7 +506,7 @@ if st.session_state.is_typing:
     with st.chat_message("assistant"):
         st.markdown('<div class="typing-indicator"><span class="typing-text">챗봇이 작성하고 있어요</span><span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span></div>', unsafe_allow_html=True)
 
-# 인삿말이 없는 경우 첫 메시지 표시 (세션 신규 시작 또는 브라우저 새로고침 시)
+# 인삿말이 없는 경우 첫 메시지 표시
 if len(st.session_state.messages) == 0:
     with st.chat_message("assistant"):
         st.markdown(PROMPT_TOPIC_QUESTION)
@@ -513,42 +515,48 @@ if len(st.session_state.messages) == 0:
 
 # 사용자 입력 처리
 if prompt := st.chat_input("메시지를 입력하세요..."):
-    # 사용자 메시지 즉시 추가 및 표시
+    # 사용자 메시지 즉시 추가
     st.session_state.messages.append({"role": "user", "content": prompt})
+    
+    # 타이핑 상태 설정
     st.session_state.is_typing = True
-    st.session_state.processed = False
     
     # 메시지 처리
-    handle_input(prompt)
+    response = handle_input(prompt)
+    
+    # 타이핑 상태 해제
+    st.session_state.is_typing = False
 
-def handle_section_revision(section_title, user_request, original_draft):
-    # 이전 섹션 내용 수집
-    previous_sections = []
-    flow_items = st.session_state.collected.get("finalized_flow", [])
-    current_index = flow_items.index(section_title)
-    
-    for i in range(current_index):
-        prev_title = flow_items[i]
-        prev_content = st.session_state.generated_drafts.get(prev_title, "")
-        if prev_content:
-            previous_sections.append(f"## {prev_title}\n{prev_content}")
-    
-    previous_sections_text = "\n\n".join(previous_sections)
-    
-    # 수정 프롬프트 생성
-    prompt = PROMPT_REVISION.format(
-        section_title=section_title,
-        user_request=user_request,
-        original_draft=original_draft,
-        previous_sections=previous_sections_text,
-        topic=st.session_state.collected.get('user_topic', ''),
-        keywords=", ".join(st.session_state.collected.get('user_keywords', [])),
-        style=f"{st.session_state.collected.get('format_style', '')} / {st.session_state.collected.get('tone', '')} / {st.session_state.collected.get('audience', '')}"
-    )
-    
-    # 수정된 내용 생성
-    revised_content = process_model_request(prompt)
-    if revised_content:
-        st.session_state.draft_section_content = revised_content
-        return True
-    return False
+def handle_section_revision(section_title, user_input, original_draft):
+    """섹션 수정을 처리하는 함수"""
+    try:
+        # 이전 섹션들의 내용을 수집
+        previous_sections = []
+        flow_items = st.session_state.collected.get("finalized_flow", [])
+        current_index = flow_items.index(section_title)
+        for i in range(current_index):
+            prev_title = flow_items[i]
+            prev_content = st.session_state.generated_drafts.get(prev_title, "")
+            if prev_content:
+                previous_sections.append(f"## {prev_title}\n{prev_content}")
+        previous_sections_text = "\n\n".join(previous_sections)
+
+        # 수정 요청 처리
+        prompt = PROMPT_REVISION.format(
+            section_title=section_title,
+            user_request=user_input,
+            original_draft=original_draft,
+            previous_sections=previous_sections_text,
+            topic=st.session_state.collected.get('user_topic', ''),
+            keywords=", ".join(st.session_state.collected.get('user_keywords', [])),
+            style=f"{st.session_state.collected.get('format_style', '')} / {st.session_state.collected.get('tone', '')} / {st.session_state.collected.get('audience', '')}"
+        )
+        bot_say(f"네, '{section_title}' 섹션을 수정해볼게요...")
+        revised_content = process_model_request(prompt)
+        if revised_content:
+            st.session_state.draft_section_content = revised_content
+            return True
+        return False
+    except Exception as e:
+        st.error(f"섹션 수정 중 오류가 발생했습니다: {str(e)}")
+        return False
