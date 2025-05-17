@@ -447,6 +447,69 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# 사이드바 진행 단계 표시
+with st.sidebar:
+    st.markdown("### 🧭 진행 단계")
+    steps = [
+        ("topic", "1. 주제 입력"),
+        ("keyword", "2. 키워드 선택"),
+        ("style", "3. 스타일 설정"),
+        ("flow", "4. 글 흐름 제안"),
+        ("intro", "5. 도입부 작성"),
+        ("section", "6. 섹션 작성"),
+        ("full_draft", "7. 전체 초안 확인")
+    ]
+    
+    # 현재 단계에 해당하는 prefix 찾기
+    current_step = st.session_state.step
+    current_prefix = ""
+    
+    # STYLE_CONFIRM일 때 flow로 표시하는 버그 수정
+    if current_step == Step.STYLE_CONFIRM.value:
+        current_prefix = "style"
+    # FLOW_SUGGEST/FLOW_CONFIRM일 때 flow로 표시
+    elif current_step in [Step.FLOW_SUGGEST.value, Step.FLOW_CONFIRM.value]:
+        current_prefix = "flow"
+    # INTRO_WRITE/INTRO_CONFIRM일 때 intro로 표시
+    elif current_step in [Step.INTRO_WRITE.value, Step.INTRO_CONFIRM.value]:
+        current_prefix = "intro"
+    # SECTION_WRITE/SECTION_CONFIRM/SECTION_EDIT일 때 section으로 표시
+    elif current_step in [Step.SECTION_WRITE.value, Step.SECTION_CONFIRM.value, Step.SECTION_EDIT.value]:
+        current_prefix = "section"
+    # FULL_DRAFT/DONE일 때 full_draft로 표시
+    elif current_step in [Step.FULL_DRAFT.value, Step.DONE.value]:
+        current_prefix = "full_draft"
+    # 그 외에는 기존 로직 사용
+    else:
+        for prefix, _ in steps:
+            if current_step.startswith(prefix):
+                current_prefix = prefix
+                break
+    
+    # 각 단계 표시
+    for key, label in steps:
+        if key == current_prefix:
+            st.markdown(f'<div class="step-current">→ {label}</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="step-other">{label}</div>', unsafe_allow_html=True)
+
+# 메시지 출력
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+# 챗봇 타이핑 인디케이터 표시
+if st.session_state.is_typing:
+    with st.chat_message("assistant"):
+        st.markdown('<div class="typing-indicator"><span class="typing-text">챗봇이 작성하고 있어요</span><span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span></div>', unsafe_allow_html=True)
+
+# 인삿말이 없는 경우 첫 메시지 표시 (세션 신규 시작 또는 브라우저 새로고침 시)
+if len(st.session_state.messages) == 0:
+    with st.chat_message("assistant"):
+        st.markdown(PROMPT_TOPIC_QUESTION)
+    st.session_state.messages.append({"role": "assistant", "content": PROMPT_TOPIC_QUESTION})
+    st.session_state.step = Step.TOPIC_QUESTION.value
+
 # 사용자 입력 대기
 user_say()
 
