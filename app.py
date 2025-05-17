@@ -274,12 +274,20 @@ def show_full_draft():
 # 챗봇 메시지 전송 함수
 def bot_say(message):
     """챗봇 메시지를 추가하고 즉시 표시하는 함수"""
-    st.session_state.messages.append({"role": "assistant", "content": message})
-    with st.chat_message("assistant"):
-        st.markdown(message)
-    st.session_state.is_typing = False
-    st.session_state.processed = True
-    st.rerun()  # UI 즉시 업데이트
+    try:
+        # 메시지 추가
+        st.session_state.messages.append({"role": "assistant", "content": message})
+        
+        # 즉시 표시
+        with st.chat_message("assistant"):
+            st.markdown(message)
+            
+        # 상태 업데이트
+        st.session_state.is_typing = False
+        st.session_state.processed = True
+        
+    except Exception as e:
+        st.error(f"메시지 표시 중 오류 발생: {str(e)}")
 
 # 사용자 입력 처리 함수
 def user_say():
@@ -290,13 +298,32 @@ def user_say():
 
 # AI 모델에 요청하고 응답 받는 공통 함수
 def process_model_request(prompt):
+    """AI 모델에 요청하고 응답을 받는 함수"""
     try:
+        # 모델 인스턴스 생성
         model = get_chat_model()
-        response = model.generate_content(prompt)
+        
+        # 응답 생성 시도
+        response = model.generate_content(
+            prompt,
+            generation_config={
+                "temperature": 0.7,
+                "top_p": 0.8,
+                "top_k": 40,
+                "max_output_tokens": 2048,
+            }
+        )
+        
+        # 응답이 없는 경우 처리
+        if not response or not response.text:
+            return "죄송합니다. 응답을 생성하지 못했습니다. 다시 시도해주세요."
+            
         return response.text
+        
     except Exception as e:
         error_msg = f"API 호출 중 오류가 발생했습니다: {str(e)}"
-        return error_msg
+        st.error(error_msg)
+        return "죄송합니다. 응답을 생성하는 중에 문제가 발생했습니다. 다시 시도해주세요."
 
 # 사용자 입력 처리 핵심 함수
 def handle_input(user_input):
@@ -523,21 +550,24 @@ display_messages()
 
 # 사용자 입력 처리
 if prompt := st.chat_input("메시지를 입력하세요..."):
-    # 사용자 메시지 즉시 추가 및 표시
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-    
-    # 타이핑 상태 설정
-    st.session_state.is_typing = True
-    st.rerun()  # UI 즉시 업데이트
-    
-    # 메시지 처리
-    handle_input(prompt)
-    
-    # 타이핑 상태 해제
-    st.session_state.is_typing = False
-    st.rerun()  # UI 즉시 업데이트
+    try:
+        # 사용자 메시지 즉시 추가 및 표시
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        
+        # 타이핑 상태 설정
+        st.session_state.is_typing = True
+        
+        # 메시지 처리
+        handle_input(prompt)
+        
+        # 타이핑 상태 해제
+        st.session_state.is_typing = False
+        
+    except Exception as e:
+        st.error(f"입력 처리 중 오류 발생: {str(e)}")
+        st.session_state.is_typing = False
 
 def handle_section_revision(section_title, user_input, original_draft):
     """섹션 수정을 처리하는 함수"""
