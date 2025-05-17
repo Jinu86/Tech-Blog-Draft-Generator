@@ -426,9 +426,10 @@ if len(st.session_state.messages) == 0:
 def handle_input(user_input):
     # 단계별 처리 로직
     step = st.session_state.step
+    user_input_lower = user_input.lower()
     
     # '전체 초안 보기' 요청 처리
-    if any(word in user_input.lower() for word in ["전체 초안", "모든 초안", "전체 내용", "결과 보기"]):
+    if any(word in user_input_lower for word in ["전체 초안", "모든 초안", "전체 내용", "결과 보기"]):
         if hasattr(st.session_state, 'full_draft') and st.session_state.full_draft:
             st.session_state.step = Step.DONE.value
             bot_say("네, 전체 초안을 다시 보여드릴게요:")
@@ -439,27 +440,276 @@ def handle_input(user_input):
         else:
             bot_say("아직 전체 초안이 작성되지 않았어요. 모든 단계를 완료하면 전체 초안을 볼 수 있습니다.")
             return
-    
+
     # 도입부 확인 단계
     if step == Step.INTRO_CONFIRM.value:
-        handle_intro_confirm(user_input)
+        # 수정 요청이 있는지 확인
+        if any(word in user_input_lower for word in ["수정", "바꿔", "다시", "다른", "변경", "고치", "아니"]):
+            section_title = st.session_state.current_section
+            original_draft = st.session_state.draft_section_content
+            prompt = PROMPT_REVISION.format(
+                section_title=section_title,
+                user_request=user_input,
+                original_draft=original_draft,
+                previous_sections="",
+                topic=st.session_state.collected.get('user_topic', ''),
+                keywords=", ".join(st.session_state.collected.get('user_keywords', [])),
+                style=f"{st.session_state.collected.get('format_style', '')} / {st.session_state.collected.get('tone', '')} / {st.session_state.collected.get('audience', '')}"
+            )
+            bot_say("네, 도입부를 수정해볼게요...")
+            revised_content = process_model_request(prompt)
+            st.session_state.draft_section_content = revised_content
+            confirm_message = PROMPT_INTRO_CONFIRM.format(intro_content=revised_content)
+            bot_say(confirm_message)
+            return
+            
+        # 진행 의사가 있는지 확인
+        if any(word in user_input_lower for word in ["네", "좋아", "괜찮", "진행", "시작", "다음"]):
+            section_title = st.session_state.current_section
+            section_content = st.session_state.draft_section_content
+            st.session_state.generated_drafts[section_title] = section_content
+            flow_items = st.session_state.collected.get("finalized_flow", [])
+            current_index = flow_items.index(section_title)
+            if current_index < len(flow_items) - 1:
+                next_section = flow_items[current_index + 1]
+                st.session_state.current_section = next_section
+                previous_sections = []
+                for i in range(current_index + 1):
+                    prev_title = flow_items[i]
+                    prev_content = st.session_state.generated_drafts.get(prev_title, "")
+                    if prev_content:
+                        previous_sections.append(f"## {prev_title}\n{prev_content}")
+                previous_sections_text = "\n\n".join(previous_sections)
+                prompt = PROMPT_SECTION_WRITE.format(
+                    section_title=next_section,
+                    previous_sections=previous_sections_text,
+                    topic=st.session_state.collected.get('user_topic', ''),
+                    keywords=", ".join(st.session_state.collected.get('user_keywords', [])),
+                    style=f"{st.session_state.collected.get('format_style', '')} / {st.session_state.collected.get('tone', '')} / {st.session_state.collected.get('audience', '')}"
+                )
+                st.session_state.step = Step.SECTION_WRITE.value
+                bot_say(f"이제 '{next_section}' 섹션을 작성해볼게요...")
+                section_content = process_model_request(prompt)
+                st.session_state.draft_section_content = section_content
+                st.session_state.step = Step.SECTION_CONFIRM.value
+                confirm_message = PROMPT_SECTION_CONFIRM.format(section_content=section_content)
+                bot_say(confirm_message)
+                return
+            else:
+                show_full_draft()
+                return
+        bot_say("""도입부에 대해 어떻게 생각하시나요?
+- 진행하시려면 '네', '좋아요', '진행할게요'라고 말씀해주세요.
+- 수정이 필요하시다면 '수정', '다시', '바꿔' 등의 말씀을 해주세요.""")
         return
-        
+
     # 섹션 확인 단계
     elif step == Step.SECTION_CONFIRM.value:
-        handle_section_confirm(user_input)
+        # 수정 요청이 있는지 확인
+        if any(word in user_input_lower for word in ["수정", "바꿔", "다시", "다른", "변경", "고치", "아니"]):
+            section_title = st.session_state.current_section
+            original_draft = st.session_state.draft_section_content
+            flow_items = st.session_state.collected.get("finalized_flow", [])
+            current_index = flow_items.index(section_title)
+            previous_sections = []
+            for i in range(current_index):
+                prev_title = flow_items[i]
+                prev_content = st.session_state.generated_drafts.get(prev_title, "")
+                if prev_content:
+                    previous_sections.append(f"## {prev_title}\n{prev_content}")
+            previous_sections_text = "\n\n".join(previous_sections)
+            prompt = PROMPT_REVISION.format(
+                section_title=section_title,
+                user_request=user_input,
+                original_draft=original_draft,
+                previous_sections=previous_sections_text,
+                topic=st.session_state.collected.get('user_topic', ''),
+                keywords=", ".join(st.session_state.collected.get('user_keywords', [])),
+                style=f"{st.session_state.collected.get('format_style', '')} / {st.session_state.collected.get('tone', '')} / {st.session_state.collected.get('audience', '')}"
+            )
+            bot_say("네, 내용을 수정해볼게요...")
+            revised_content = process_model_request(prompt)
+            st.session_state.draft_section_content = revised_content
+            confirm_message = PROMPT_SECTION_CONFIRM.format(section_content=revised_content)
+            bot_say(confirm_message)
+            return
+            
+        # 진행 의사가 있는지 확인
+        if any(word in user_input_lower for word in ["네", "좋아", "괜찮", "진행", "시작", "다음"]):
+            section_title = st.session_state.current_section
+            section_content = st.session_state.draft_section_content
+            st.session_state.generated_drafts[section_title] = section_content
+            flow_items = st.session_state.collected.get("finalized_flow", [])
+            current_index = flow_items.index(section_title)
+            if current_index < len(flow_items) - 1:
+                next_section = flow_items[current_index + 1]
+                st.session_state.current_section = next_section
+                previous_sections = []
+                for i in range(current_index + 1):
+                    prev_title = flow_items[i]
+                    prev_content = st.session_state.generated_drafts.get(prev_title, "")
+                    if prev_content:
+                        previous_sections.append(f"## {prev_title}\n{prev_content}")
+                previous_sections_text = "\n\n".join(previous_sections)
+                prompt = PROMPT_SECTION_WRITE.format(
+                    section_title=next_section,
+                    previous_sections=previous_sections_text,
+                    topic=st.session_state.collected.get('user_topic', ''),
+                    keywords=", ".join(st.session_state.collected.get('user_keywords', [])),
+                    style=f"{st.session_state.collected.get('format_style', '')} / {st.session_state.collected.get('tone', '')} / {st.session_state.collected.get('audience', '')}"
+                )
+                st.session_state.step = Step.SECTION_WRITE.value
+                bot_say(f"이제 '{next_section}' 섹션을 작성해볼게요...")
+                section_content = process_model_request(prompt)
+                st.session_state.draft_section_content = section_content
+                st.session_state.step = Step.SECTION_CONFIRM.value
+                confirm_message = PROMPT_SECTION_CONFIRM.format(section_content=section_content)
+                bot_say(confirm_message)
+                return
+            else:
+                show_full_draft()
+                return
+        bot_say("""섹션 내용에 대해 어떻게 생각하시나요?
+- 진행하시려면 '네', '좋아요', '진행할게요'라고 말씀해주세요.
+- 수정이 필요하시다면 '수정', '다시', '바꿔' 등의 말씀을 해주세요.""")
         return
-    
+
     # 흐름 확인 단계
     elif step == Step.FLOW_CONFIRM.value:
-        handle_flow_confirm(user_input)
+        # 수정 요청이 있는지 확인
+        if any(word in user_input_lower for word in ["수정", "바꿔", "다시", "다른", "변경", "고치", "아니"]):
+            bot_say("네, 흐름을 다시 입력해주시겠어요?")
+            st.session_state.step = Step.FLOW_SUGGEST.value
+            return
+            
+        # 진행 의사가 있는지 확인
+        if any(word in user_input_lower for word in ["네", "좋아", "괜찮", "진행", "시작", "다음", "예", "그래", "맞아"]):
+            flow_items = st.session_state.collected.get("finalized_flow", [])
+            if flow_items:
+                first_section = flow_items[0]
+                st.session_state.step = Step.INTRO_WRITE.value
+                prompt = PROMPT_INTRO_WRITE.format(
+                    section_title=first_section,
+                    topic=st.session_state.collected.get('user_topic', ''),
+                    keywords=", ".join(st.session_state.collected.get('user_keywords', [])),
+                    style=f"{st.session_state.collected.get('format_style', '')} / {st.session_state.collected.get('tone', '')} / {st.session_state.collected.get('audience', '')}"
+                )
+                bot_say(f"좋습니다! 이제 첫 번째 섹션인 '{first_section}'에 대한 도입부를 작성해볼게요...")
+                intro_content = process_model_request(prompt)
+                st.session_state.current_section = first_section
+                st.session_state.draft_section_content = intro_content
+                st.session_state.step = Step.INTRO_CONFIRM.value
+                confirm_message = PROMPT_INTRO_CONFIRM.format(intro_content=intro_content)
+                bot_say(confirm_message)
+                return
+            else:
+                bot_say("흐름 정보가 없습니다. 다시 시도해주세요.")
+                st.session_state.step = Step.FLOW_SUGGEST.value
+                return
+        bot_say("""흐름에 대해 어떻게 생각하시나요?
+- 진행하시려면 '네', '좋아요', '진행할게요'라고 말씀해주세요.
+- 수정이 필요하시다면 '수정', '다시', '바꿔' 등의 말씀을 해주세요.""")
         return
-        
+
     # 글 흐름 제안 단계
     elif step == Step.FLOW_SUGGEST.value:
-        handle_flow_suggestion(user_input)
+        # 수정 요청이 있는지 확인
+        if any(word in user_input_lower for word in ["수정", "바꿔", "다시", "다른", "변경", "고치", "아니"]):
+            st.session_state.flow_rejection = True
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("새 흐름 제안 받기"):
+                    st.session_state.flow_rejection = False
+                    prompt = f"""
+{REACT_SYSTEM_PROMPT}
+
+주제: {st.session_state.collected.get('user_topic', '')}
+키워드: {st.session_state.collected.get('user_keywords_raw', '')}
+스타일: {st.session_state.collected.get('user_style_raw', '')}
+
+위 정보를 바탕으로 블로그의 새로운 글 흐름을 제안해주세요. 이전에 제안된 흐름과는 다른 새로운 구성으로 제안해주세요.
+다음 가이드라인을 따라주세요:
+
+1. 서론, 본문(2-3개 섹션), 결론의 기본 흐름을 포함해주세요.
+2. 각 섹션은 명확하고 구체적인 제목을 가져야 합니다.
+3. 제목만 나열해주세요.
+4. 각 항목 앞에 번호를 붙여주세요(1., 2. 등).
+5. 각 섹션에 [서론], [본문], [결론] 중 하나를 포함해주세요.
+6. 마지막에 "이 흐름은 어떠신가요?"라고 물어봐주세요.
+"""
+                    st.session_state.step = Step.FLOW_SUGGEST.value
+                    response_text = process_model_request(prompt)
+                    st.session_state.collected["suggested_flow"] = response_text
+                    bot_say(response_text)
+                    return
+            with col2:
+                if st.button("직접 흐름 수정하기"):
+                    st.session_state.flow_rejection = False
+                    bot_say("""다음과 같은 형식으로 각 섹션의 흐름을 직접 수정해주세요:
+
+[서론] 제목
+[본문] 제목
+[본문] 제목
+[결론] 제목
+
+각 줄에 하나의 소제목을 입력해주세요.""")
+                    st.session_state.user_flow_input = True
+                    return
+            if hasattr(st.session_state, 'flow_rejection') and st.session_state.flow_rejection:
+                bot_say("위 옵션 중 하나를 선택해주세요.")
+                return
+                
+        # 사용자가 직접 흐름을 입력하는 경우
+        if hasattr(st.session_state, 'user_flow_input') and st.session_state.user_flow_input:
+            flow_items = user_input.strip().split('\n')
+            flow_items = [item.strip() for item in flow_items if item.strip()]
+            if flow_items:
+                st.session_state.user_flow_input = False
+                st.session_state.collected["finalized_flow"] = flow_items
+                flow_list = "\n".join([f"{i+1}. {item}" for i, item in enumerate(flow_items)])
+                confirm_message = PROMPT_FLOW_CONFIRM.format(finalized_flow=flow_list)
+                st.session_state.step = Step.FLOW_CONFIRM.value
+                bot_say(confirm_message)
+                return
+            else:
+                bot_say("입력이 비어있는 것 같습니다. 각 줄에 하나의 소제목을 입력해주세요.")
+                return
+                
+        # 진행 의사가 있는지 확인
+        if any(word in user_input_lower for word in ["네", "좋아", "괜찮", "진행", "시작", "다음", "예", "그래", "맞아"]):
+            suggested_flow = st.session_state.collected.get("suggested_flow", "")
+            flow_items = []
+            for line in suggested_flow.split('\n'):
+                if any(f"{i}." in line for i in range(1, 10)) and any(tag in line for tag in ["[서론]", "[본문]", "[결론]"]):
+                    content = line.split('.', 1)[1].strip() if '.' in line else line.strip()
+                    flow_items.append(content)
+            st.session_state.collected["finalized_flow"] = flow_items
+            if flow_items:
+                first_section = flow_items[0]
+                st.session_state.step = Step.INTRO_WRITE.value
+                prompt = PROMPT_INTRO_WRITE.format(
+                    section_title=first_section,
+                    topic=st.session_state.collected.get('user_topic', ''),
+                    keywords=", ".join(st.session_state.collected.get('user_keywords', [])),
+                    style=f"{st.session_state.collected.get('format_style', '')} / {st.session_state.collected.get('tone', '')} / {st.session_state.collected.get('audience', '')}"
+                )
+                bot_say(f"좋습니다! 이제 첫 번째 섹션인 '{first_section}'에 대한 도입부를 작성해볼게요...")
+                intro_content = process_model_request(prompt)
+                st.session_state.current_section = first_section
+                st.session_state.draft_section_content = intro_content
+                st.session_state.step = Step.INTRO_CONFIRM.value
+                confirm_message = PROMPT_INTRO_CONFIRM.format(intro_content=intro_content)
+                bot_say(confirm_message)
+                return
+            else:
+                bot_say("죄송합니다. 제안된 흐름을 처리하는 데 문제가 있었습니다. 다시 시도해주세요.")
+                st.session_state.step = Step.FLOW_SUGGEST.value
+                return
+        bot_say("""제안된 흐름에 대해 어떻게 생각하시나요?
+- 진행하시려면 '네', '좋아요', '진행할게요'라고 말씀해주세요.
+- 수정이 필요하시다면 '수정', '다시', '바꿔' 등의 말씀을 해주세요.""")
         return
-        
+
     # 주제 질문 단계
     elif step == Step.TOPIC_QUESTION.value:
         # 주제 저장
@@ -471,17 +721,17 @@ def handle_input(user_input):
         confirm_message = PROMPT_TOPIC_CONFIRM.format(inferred_topic=inferred_topic)
         bot_say(confirm_message)
         return
-        
+
     # 주제 확인 단계
     elif step == Step.TOPIC_CONFIRM.value:
         # 수정 요청이 있는지 확인
-        if any(word in user_input.lower() for word in ["수정", "바꿔", "다시", "다른", "변경", "고치", "아니"]):
+        if any(word in user_input_lower for word in ["수정", "바꿔", "다시", "다른", "변경", "고치", "아니"]):
             bot_say("네, 주제를 다시 말씀해주시겠어요?")
             st.session_state.step = Step.TOPIC_QUESTION.value
             return
             
         # 진행 의사가 있는지 확인
-        if any(word in user_input.lower() for word in ["네", "좋아", "괜찮", "진행", "시작", "다음"]):
+        if any(word in user_input_lower for word in ["네", "좋아", "괜찮", "진행", "시작", "다음"]):
             prompt = f"""
 {REACT_SYSTEM_PROMPT}
 
@@ -506,7 +756,7 @@ def handle_input(user_input):
 - 진행하시려면 '네', '좋아요', '진행할게요'라고 말씀해주세요.
 - 수정이 필요하시다면 '수정', '다시', '바꿔' 등의 말씀을 해주세요.""")
         return
-    
+
     # 키워드 질문 단계
     elif step == Step.KEYWORD_QUESTION.value:
         # 사용자가 선택한 키워드 저장
@@ -524,11 +774,11 @@ def handle_input(user_input):
         confirm_message = PROMPT_KEYWORD_CONFIRM.format(selected_keywords=formatted_keywords)
         bot_say(confirm_message)
         return
-        
+
     # 키워드 확인 단계
     elif step == Step.KEYWORD_CONFIRM.value:
         # 수정 요청이 있는지 확인
-        if any(word in user_input.lower() for word in ["수정", "바꿔", "다시", "다른", "변경", "고치", "아니"]):
+        if any(word in user_input_lower for word in ["수정", "바꿔", "다시", "다른", "변경", "고치", "아니"]):
             bot_say("네, 키워드를 다시 선택해주시겠어요?")
             st.session_state.step = Step.KEYWORD_QUESTION.value
             
@@ -541,7 +791,7 @@ def handle_input(user_input):
             return
             
         # 진행 의사가 있는지 확인
-        if any(word in user_input.lower() for word in ["네", "좋아", "괜찮", "진행", "시작", "다음"]):
+        if any(word in user_input_lower for word in ["네", "좋아", "괜찮", "진행", "시작", "다음"]):
             # 스타일 질문으로 넘어가기
             st.session_state.step = Step.STYLE_QUESTION.value
             bot_say(PROMPT_STYLE_QUESTION)
@@ -552,7 +802,7 @@ def handle_input(user_input):
 - 진행하시려면 '네', '좋아요', '진행할게요'라고 말씀해주세요.
 - 수정이 필요하시다면 '수정', '다시', '바꿔' 등의 말씀을 해주세요.""")
         return
-    
+
     # 스타일 질문 단계
     elif step == Step.STYLE_QUESTION.value:
         # 스타일 정보 파싱
@@ -599,17 +849,17 @@ def handle_input(user_input):
         )
         bot_say(confirm_message)
         return
-    
+
     # 스타일 확인 단계
     elif step == Step.STYLE_CONFIRM.value:
         # 수정 요청이 있는지 확인
-        if any(word in user_input.lower() for word in ["수정", "바꿔", "다시", "다른", "변경", "고치", "아니"]):
+        if any(word in user_input_lower for word in ["수정", "바꿔", "다시", "다른", "변경", "고치", "아니"]):
             bot_say("네, 스타일을 다시 입력해주시겠어요?")
             st.session_state.step = Step.STYLE_QUESTION.value
             return
             
         # 진행 의사가 있는지 확인
-        if any(word in user_input.lower() for word in ["네", "좋아", "괜찮", "진행", "시작", "다음"]):
+        if any(word in user_input_lower for word in ["네", "좋아", "괜찮", "진행", "시작", "다음"]):
             # 바로 흐름 제안 프롬프트 생성
             prompt = f"""
 {REACT_SYSTEM_PROMPT}
@@ -643,7 +893,7 @@ def handle_input(user_input):
             st.session_state.collected["suggested_flow"] = response_text
             bot_say(response_text)
             return
-            
+
         # 응답이 명확하지 않은 경우
         bot_say("""스타일에 대해 어떻게 생각하시나요?
 - 진행하시려면 '네', '좋아요', '진행할게요'라고 말씀해주세요.
@@ -653,18 +903,8 @@ def handle_input(user_input):
     # 기타 상황에서는 안내 메시지
     bot_say("어떤 작업을 도와드릴까요?")
 
-# 사용자 메시지 처리 함수
-def user_say():
-    user_input = st.chat_input("메시지를 입력하세요")
-    if user_input:
-        st.session_state.messages.append({"role": "user", "content": user_input})
-        with st.chat_message("user"):
-            st.markdown(user_input)
-        
-        # 타이핑 인디케이터 표시 전 재실행
-        st.session_state.is_typing = True
-        st.session_state.processed = False
-        st.rerun()
+# 사용자 입력 대기
+user_say()
 
 # 타이핑 상태이고 미처리된 메시지가 있는 경우 메시지 처리
 if st.session_state.is_typing and not st.session_state.processed and len(st.session_state.messages) > 0:
@@ -674,339 +914,3 @@ if st.session_state.is_typing and not st.session_state.processed and len(st.sess
         st.session_state.processed = True
         # 실제 메시지 처리
         handle_input(user_input)
-
-# 사용자 입력 대기
-user_say()
-
-# 도입부 확인 단계 처리 함수
-def handle_intro_confirm(user_input):
-    user_input_lower = user_input.lower()
-    
-    # 수정 요청이 있는지 확인
-    if any(word in user_input_lower for word in ["수정", "바꿔", "다시", "다른", "변경", "고치", "아니"]):
-        # 수정 요청 처리
-        section_title = st.session_state.current_section
-        original_draft = st.session_state.draft_section_content
-        
-        # 수정 프롬프트 생성
-        prompt = PROMPT_REVISION.format(
-            section_title=section_title,
-            user_request=user_input,
-            original_draft=original_draft,
-            previous_sections="",  # 첫 섹션이므로 이전 섹션 없음
-            topic=st.session_state.collected.get('user_topic', ''),
-            keywords=", ".join(st.session_state.collected.get('user_keywords', [])),
-            style=f"{st.session_state.collected.get('format_style', '')} / {st.session_state.collected.get('tone', '')} / {st.session_state.collected.get('audience', '')}"
-        )
-        
-        # 수정된 내용 요청
-        bot_say("네, 도입부를 수정해볼게요...")
-        revised_content = process_model_request(prompt)
-        
-        # 수정된 내용 저장
-        st.session_state.draft_section_content = revised_content
-        
-        # 수정된 내용 확인 요청
-        confirm_message = PROMPT_INTRO_CONFIRM.format(intro_content=revised_content)
-        bot_say(confirm_message)
-        return
-    
-    # 진행 의사가 있는지 확인
-    if any(word in user_input_lower for word in ["네", "좋아", "괜찮", "진행", "시작", "다음"]):
-        # 현재 섹션 내용 저장
-        section_title = st.session_state.current_section
-        section_content = st.session_state.draft_section_content
-        st.session_state.generated_drafts[section_title] = section_content
-        
-        # 다음 섹션으로 이동
-        flow_items = st.session_state.collected.get("finalized_flow", [])
-        current_index = flow_items.index(section_title)
-        
-        # 마지막 섹션이 아니면 다음 섹션으로
-        if current_index < len(flow_items) - 1:
-            next_section = flow_items[current_index + 1]
-            st.session_state.current_section = next_section
-            
-            # 이전 섹션 내용 수집
-            previous_sections = []
-            for i in range(current_index + 1):
-                prev_title = flow_items[i]
-                prev_content = st.session_state.generated_drafts.get(prev_title, "")
-                if prev_content:
-                    previous_sections.append(f"## {prev_title}\n{prev_content}")
-            
-            previous_sections_text = "\n\n".join(previous_sections)
-            
-            # 다음 섹션 작성 프롬프트 생성
-            prompt = PROMPT_SECTION_WRITE.format(
-                section_title=next_section,
-                previous_sections=previous_sections_text,
-                topic=st.session_state.collected.get('user_topic', ''),
-                keywords=", ".join(st.session_state.collected.get('user_keywords', [])),
-                style=f"{st.session_state.collected.get('format_style', '')} / {st.session_state.collected.get('tone', '')} / {st.session_state.collected.get('audience', '')}"
-            )
-            
-            # 섹션 작성 요청
-            st.session_state.step = Step.SECTION_WRITE.value
-            bot_say(f"이제 '{next_section}' 섹션을 작성해볼게요...")
-            
-            # API 호출하여 섹션 생성
-            section_content = process_model_request(prompt)
-            
-            # 섹션 내용 저장
-            st.session_state.draft_section_content = section_content
-            
-            # 섹션 확인 요청
-            st.session_state.step = Step.SECTION_CONFIRM.value
-            confirm_message = PROMPT_SECTION_CONFIRM.format(section_content=section_content)
-            bot_say(confirm_message)
-            return
-        else:
-            # 모든 섹션이 완료되었으면 전체 초안 표시
-            show_full_draft()
-            return
-    
-    # 응답이 명확하지 않은 경우
-    bot_say("""도입부에 대해 어떻게 생각하시나요?
-- 진행하시려면 '네', '좋아요', '진행할게요'라고 말씀해주세요.
-- 수정이 필요하시다면 '수정', '다시', '바꿔' 등의 말씀을 해주세요.""")
-
-# 섹션 확인 단계 처리 함수
-def handle_section_confirm(user_input):
-    user_input_lower = user_input.lower()
-    
-    # 수정 요청이 있는지 확인
-    if any(word in user_input_lower for word in ["수정", "바꿔", "다시", "다른", "변경", "고치", "아니"]):
-        # 수정 요청 처리
-        section_title = st.session_state.current_section
-        original_draft = st.session_state.draft_section_content
-        
-        # 이전 섹션 내용 수집
-        flow_items = st.session_state.collected.get("finalized_flow", [])
-        current_index = flow_items.index(section_title)
-        
-        previous_sections = []
-        for i in range(current_index):
-            prev_title = flow_items[i]
-            prev_content = st.session_state.generated_drafts.get(prev_title, "")
-            if prev_content:
-                previous_sections.append(f"## {prev_title}\n{prev_content}")
-        
-        previous_sections_text = "\n\n".join(previous_sections)
-        
-        # 수정 프롬프트 생성
-        prompt = PROMPT_REVISION.format(
-            section_title=section_title,
-            user_request=user_input,
-            original_draft=original_draft,
-            previous_sections=previous_sections_text,
-            topic=st.session_state.collected.get('user_topic', ''),
-            keywords=", ".join(st.session_state.collected.get('user_keywords', [])),
-            style=f"{st.session_state.collected.get('format_style', '')} / {st.session_state.collected.get('tone', '')} / {st.session_state.collected.get('audience', '')}"
-        )
-        
-        # 수정된 내용 요청
-        bot_say("네, 내용을 수정해볼게요...")
-        revised_content = process_model_request(prompt)
-        
-        # 수정된 내용 저장
-        st.session_state.draft_section_content = revised_content
-        
-        # 수정된 내용 확인 요청
-        confirm_message = PROMPT_SECTION_CONFIRM.format(section_content=revised_content)
-        bot_say(confirm_message)
-        return
-    
-    # 진행 의사가 있는지 확인
-    if any(word in user_input_lower for word in ["네", "좋아", "괜찮", "진행", "시작", "다음"]):
-        # 현재 섹션 내용 저장
-        section_title = st.session_state.current_section
-        section_content = st.session_state.draft_section_content
-        st.session_state.generated_drafts[section_title] = section_content
-        
-        # 다음 섹션으로 이동
-        flow_items = st.session_state.collected.get("finalized_flow", [])
-        current_index = flow_items.index(section_title)
-        
-        # 마지막 섹션이 아니면 다음 섹션으로
-        if current_index < len(flow_items) - 1:
-            next_section = flow_items[current_index + 1]
-            st.session_state.current_section = next_section
-            
-            # 이전 섹션 내용 수집
-            previous_sections = []
-            for i in range(current_index + 1):
-                prev_title = flow_items[i]
-                prev_content = st.session_state.generated_drafts.get(prev_title, "")
-                if prev_content:
-                    previous_sections.append(f"## {prev_title}\n{prev_content}")
-            
-            previous_sections_text = "\n\n".join(previous_sections)
-            
-            # 다음 섹션 작성 프롬프트 생성
-            prompt = PROMPT_SECTION_WRITE.format(
-                section_title=next_section,
-                previous_sections=previous_sections_text,
-                topic=st.session_state.collected.get('user_topic', ''),
-                keywords=", ".join(st.session_state.collected.get('user_keywords', [])),
-                style=f"{st.session_state.collected.get('format_style', '')} / {st.session_state.collected.get('tone', '')} / {st.session_state.collected.get('audience', '')}"
-            )
-            
-            # 섹션 작성 요청
-            st.session_state.step = Step.SECTION_WRITE.value
-            bot_say(f"이제 '{next_section}' 섹션을 작성해볼게요...")
-            
-            # API 호출하여 섹션 생성
-            section_content = process_model_request(prompt)
-            
-            # 섹션 내용 저장
-            st.session_state.draft_section_content = section_content
-            
-            # 섹션 확인 요청
-            st.session_state.step = Step.SECTION_CONFIRM.value
-            confirm_message = PROMPT_SECTION_CONFIRM.format(section_content=section_content)
-            bot_say(confirm_message)
-            return
-        else:
-            # 모든 섹션이 완료되었으면 전체 초안 표시
-            show_full_draft()
-            return
-    
-    # 응답이 명확하지 않은 경우
-    bot_say("""섹션 내용에 대해 어떻게 생각하시나요?
-- 진행하시려면 '네', '좋아요', '진행할게요'라고 말씀해주세요.
-- 수정이 필요하시다면 '수정', '다시', '바꿔' 등의 말씀을 해주세요.""")
-
-# 글 흐름 제안 단계 처리 함수
-def handle_flow_suggestion(user_input):
-    user_input_lower = user_input.lower()
-    
-    # 수정 요청이 있는지 확인
-    if any(word in user_input_lower for word in ["수정", "바꿔", "다시", "다른", "변경", "고치", "아니"]):
-        # 사용자에게 옵션 제시 (버튼 UI 사용)
-        st.session_state.flow_rejection = True
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("새 흐름 제안 받기"):
-                st.session_state.flow_rejection = False
-                # 새로운 흐름 제안을 위한 프롬프트 생성
-                prompt = f"""
-{REACT_SYSTEM_PROMPT}
-
-주제: {st.session_state.collected.get('user_topic', '')}
-키워드: {st.session_state.collected.get('user_keywords_raw', '')}
-스타일: {st.session_state.collected.get('user_style_raw', '')}
-
-위 정보를 바탕으로 블로그의 새로운 글 흐름을 제안해주세요. 이전에 제안된 흐름과는 다른 새로운 구성으로 제안해주세요.
-다음 가이드라인을 따라주세요:
-
-1. 서론, 본문(2-3개 섹션), 결론의 기본 흐름을 포함해주세요.
-2. 각 섹션은 명확하고 구체적인 제목을 가져야 합니다.
-3. 제목만 나열해주세요.
-4. 각 항목 앞에 번호를 붙여주세요(1., 2. 등).
-5. 각 섹션에 [서론], [본문], [결론] 중 하나를 포함해주세요.
-6. 마지막에 "이 흐름은 어떠신가요?"라고 물어봐주세요.
-"""
-                st.session_state.step = Step.FLOW_SUGGEST.value
-                response_text = process_model_request(prompt)
-                st.session_state.collected["suggested_flow"] = response_text
-                bot_say(response_text)
-                return
-
-        with col2:
-            if st.button("직접 흐름 수정하기"):
-                st.session_state.flow_rejection = False
-                bot_say("""다음과 같은 형식으로 각 섹션의 흐름을 직접 수정해주세요:
-
-[서론] 제목
-[본문] 제목
-[본문] 제목
-[결론] 제목
-
-각 줄에 하나의 소제목을 입력해주세요.""")
-                # 사용자 입력 모드로 설정
-                st.session_state.user_flow_input = True
-                return
-            
-        # 사용자가 흐름을 거부했지만 아직 버튼을 누르지 않은 경우 안내 메시지 표시
-        if hasattr(st.session_state, 'flow_rejection') and st.session_state.flow_rejection:
-            bot_say("위 옵션 중 하나를 선택해주세요.")
-            return
-    
-    # 사용자 직접 입력 모드인 경우
-    if hasattr(st.session_state, 'user_flow_input') and st.session_state.user_flow_input:
-        # 사용자 입력을 처리하여 흐름 항목으로 변환
-        flow_items = user_input.strip().split('\n')
-        flow_items = [item.strip() for item in flow_items if item.strip()]
-        
-        if flow_items:
-            # 사용자 입력 모드 해제
-            st.session_state.user_flow_input = False
-            # 흐름 저장
-            st.session_state.collected["finalized_flow"] = flow_items
-            # 확인 메시지 생성
-            flow_list = "\n".join([f"{i+1}. {item}" for i, item in enumerate(flow_items)])
-            confirm_message = PROMPT_FLOW_CONFIRM.format(finalized_flow=flow_list)
-            # 단계 변경 및 메시지 표시
-            st.session_state.step = Step.FLOW_CONFIRM.value
-            bot_say(confirm_message)
-            return
-        else:
-            # 입력이 비어있는 경우
-            bot_say("입력이 비어있는 것 같습니다. 각 줄에 하나의 소제목을 입력해주세요.")
-            return
-    
-    # 진행 의사가 있는지 확인 (기본 흐름 수용)
-    if any(word in user_input_lower for word in ["네", "좋아", "괜찮", "진행", "시작", "다음", "예", "그래", "맞아"]):
-        # 제안된 흐름에서 항목 추출
-        suggested_flow = st.session_state.collected.get("suggested_flow", "")
-        flow_items = []
-        
-        for line in suggested_flow.split('\n'):
-            # 번호가 있는 줄만 추출
-            if any(f"{i}." in line for i in range(1, 10)) and any(tag in line for tag in ["[서론]", "[본문]", "[결론]"]):
-                # 번호 제거하고 내용만 저장
-                content = line.split('.', 1)[1].strip() if '.' in line else line.strip()
-                flow_items.append(content)
-        
-        # 흐름 저장
-        st.session_state.collected["finalized_flow"] = flow_items
-        
-        # 첫 번째 섹션(서론)으로 이동
-        if flow_items:
-            first_section = flow_items[0]
-            st.session_state.step = Step.INTRO_WRITE.value
-            
-            # 도입부 작성 프롬프트 생성
-            prompt = PROMPT_INTRO_WRITE.format(
-                section_title=first_section,
-                topic=st.session_state.collected.get('user_topic', ''),
-                keywords=", ".join(st.session_state.collected.get('user_keywords', [])),
-                style=f"{st.session_state.collected.get('format_style', '')} / {st.session_state.collected.get('tone', '')} / {st.session_state.collected.get('audience', '')}"
-            )
-            
-            # 챗봇에게 도입부 작성 요청
-            bot_say(f"좋습니다! 이제 첫 번째 섹션인 '{first_section}'에 대한 도입부를 작성해볼게요...")
-            
-            # API 호출하여 도입부 생성
-            intro_content = process_model_request(prompt)
-            
-            # 도입부 저장
-            st.session_state.current_section = first_section
-            st.session_state.draft_section_content = intro_content
-            
-            # 도입부 확인 요청
-            st.session_state.step = Step.INTRO_CONFIRM.value
-            confirm_message = PROMPT_INTRO_CONFIRM.format(intro_content=intro_content)
-            bot_say(confirm_message)
-            return
-        else:
-            # 흐름 추출 실패 시
-            bot_say("죄송합니다. 제안된 흐름을 처리하는 데 문제가 있었습니다. 다시 시도해주세요.")
-            st.session_state.step = Step.FLOW_SUGGEST.value
-            return
-    
-    # 위 조건에 해당하지 않는 경우 안내 메시지 표시
-    bot_say("""제안된 흐름에 대해 어떻게 생각하시나요?
-- 진행하시려면 '네', '좋아요', '진행할게요'라고 말씀해주세요.
-- 수정이 필요하시다면 '수정', '다시', '바꿔' 등의 말씀을 해주세요.""")
