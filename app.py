@@ -279,9 +279,27 @@ with st.sidebar:
     current_step = st.session_state.step
     for key, label in steps:
         if current_step.startswith(key):
-            st.markdown(f"- **{label}**")
+            # 현재 단계는 파란색 글씨, 연한 파란색 배경, 화살표 아이콘 추가
+            st.markdown(f"""
+            <div style="
+                margin-left: 0px; 
+                padding: 5px 10px; 
+                background-color: #E6F0FF; 
+                color: #0066CC; 
+                font-weight: bold; 
+                font-size: 16px;
+                border-radius: 5px;
+                margin-bottom: 5px;
+            ">→ {label}</div>
+            """, unsafe_allow_html=True)
         else:
-            st.markdown(f"- {label}")
+            # 다른 단계는 기본 스타일
+            st.markdown(f"""
+            <div style="
+                padding: 5px 10px;
+                margin-bottom: 5px;
+            ">{label}</div>
+            """, unsafe_allow_html=True)
 
 # 챗 UI
 st.title("🧠 기술 블로그 초안 생성 챗봇")
@@ -377,6 +395,87 @@ def handle_confirmation(user_input, positive_action, negative_action, unclear_me
             unclear_message = "음, 제가 이해한 주제가 맞는지 잘 모르겠어요. 이 주제로 진행해도 괜찮을까요? 아니면 다른 주제를 원하시나요?"
         bot_say(unclear_message)
         # 현재 상태 유지 (다시 물어봄)
+
+# 도입부 작성 시작 및 처리 함수
+def process_intro_section():
+    subtitles = st.session_state.collected.get("finalized_flow", [])
+    if not subtitles:
+        bot_say("오류가 발생했습니다. 소제목이 없습니다. 다시 시도해주세요.")
+        st.session_state.step = Step.STYLE_CONFIRM.value
+        return
+    
+    intro_section = subtitles[0]
+    topic = st.session_state.collected.get('user_topic', '')
+    keywords = st.session_state.collected.get('user_keywords_raw', '')
+    style = st.session_state.collected.get('user_style_raw', '')
+    
+    prompt = f"""
+{REACT_SYSTEM_PROMPT}
+
+이 글의 서론 부분인 "{intro_section}"에 대한 초안을 작성해주세요.
+
+다음 요소를 포함해주세요:
+1. 주제에 대한 간결한 소개와 중요성
+2. 독자가 이 글을 읽어야 하는 이유
+3. 글에서 다룰 내용에 대한 간략한 개요
+4. 독자의 관심을 끌 수 있는 흥미로운 시작점
+
+주제: {topic}
+키워드: {keywords}
+스타일: {style}
+"""
+    
+    st.session_state.current_section_index = 0
+    response_text = process_model_request(prompt)
+    st.session_state.generated_drafts = {}
+    st.session_state.generated_drafts[intro_section] = response_text
+    
+    # UI에 도입부 표시 (문장별 수정 버튼 추가)
+    st.session_state.step = Step.INTRO_CONFIRM.value
+    
+    # 섹션 표시 및 수정 UI
+    bot_say(f"도입부 \"{intro_section}\"의 초안입니다:")
+    
+    # 문장 단위로 분리하여 각 문장에 수정 버튼 추가
+    paragraphs = response_text.split("\n\n")
+    formatted_content = ""
+    for p_idx, paragraph in enumerate(paragraphs):
+        if paragraph.strip():
+            formatted_content += f"문단 {p_idx+1}:\n{paragraph}\n\n"
+    
+    bot_say(formatted_content + "\n\n이 도입부 내용이 괜찮으신가요? 수정이 필요하면 '수정'이라고 말씀해주세요.")
+
+# 흐름 확인 처리 함수
+def process_flow_confirmation():
+    # 흐름 제안에서 소제목 추출
+    flow_text = st.session_state.collected.get("suggested_flow", "")
+    subtitles = []
+    for line in flow_text.split("\n"):
+        line = line.strip()
+        if line and ("[서론]" in line or "[본문]" in line or "[결론]" in line):
+            # 앞에 번호가 있으면 제거 (예: "1. [서론] ..." -> "[서론] ...")
+            if '. ' in line and line[0].isdigit():
+                line = line.split('. ', 1)[1]
+            subtitles.append(line)
+    
+    # 소제목이 추출되지 않은 경우 다시 처리
+    if not subtitles:
+        bot_say("""죄송합니다. 글 흐름에서 소제목을 추출하는데 문제가 있었습니다. 다음과 같은 형식으로 소제목을 직접 입력해주시겠어요?
+
+예시:
+[서론] Docker의 이해와 필요성
+[본문] Docker 기본 개념과 작동 원리
+[본문] Docker 실전 활용 사례
+[본문] Docker와 다른 컨테이너 기술 비교
+[결론] Docker의 미래와 학습 방향
+
+각 줄에 하나의 소제목을 입력해주세요. 각 소제목 앞에는 [서론], [본문], [결론] 중 하나를 포함해주세요.""")
+        st.session_state.user_flow_input = True
+        return
+    
+    st.session_state.collected["finalized_flow"] = subtitles
+    process_intro_section()
+    return
 
 # 단계별 처리 로직
 def handle_input(user_input):
@@ -577,35 +676,38 @@ def handle_input(user_input):
 """
             response_text = process_model_request(prompt)
             st.session_state.collected["suggested_flow"] = response_text
+            # 중요: 다음 단계로 진행하도록 상태 설정
+            st.session_state.step = Step.FLOW_SUGGEST.value  # FLOW_CONFIRM이 아닌 FLOW_SUGGEST로 설정
             bot_say(response_text)
             return
             
         # 응답이 명확하지 않은 경우
-        bot_say("""흐름에 대해 어떻게 생각하시나요?
+        bot_say("""스타일에 대해 어떻게 생각하시나요?
 - 진행하시려면 '네', '좋아요', '진행할게요'라고 말씀해주세요.
 - 수정이 필요하시다면 '수정', '다시', '바꿔' 등의 말씀을 해주세요.""")
 
-    # 흐름 제안 단계
+    # 글 흐름 제안 단계
     elif step == Step.FLOW_SUGGEST.value:
-        # 이 단계는 이제 사용되지 않음 (스타일 확인 단계에서 바로 처리)
-        pass
-
-    # 흐름 확인 단계
-    elif step == Step.FLOW_CONFIRM.value:
         # 사용자의 응답을 분석
         user_input_lower = user_input.lower()
         
         # 수정 요청이 있는지 확인
         if any(word in user_input_lower for word in ["수정", "바꿔", "다시", "다른", "변경", "고치", "아니"]):
-            # 새로운 흐름 제안을 위한 프롬프트 생성
-            prompt = f"""
+            # 사용자에게 옵션 제시 (버튼 UI 사용)
+            st.session_state.flow_rejection = True
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("새 흐름 제안 받기"):
+                    st.session_state.flow_rejection = False
+                    # 새로운 흐름 제안을 위한 프롬프트 생성
+                    prompt = f"""
 {REACT_SYSTEM_PROMPT}
 
 주제: {st.session_state.collected.get('user_topic', '')}
 키워드: {st.session_state.collected.get('user_keywords_raw', '')}
 스타일: {st.session_state.collected.get('user_style_raw', '')}
 
-위 정보를 바탕으로 블로그의 새로운 글 흐름을 제안해주세요.
+위 정보를 바탕으로 블로그의 새로운 글 흐름을 제안해주세요. 이전에 제안된 흐름과는 다른 새로운 구성으로 제안해주세요.
 다음 가이드라인을 따라주세요:
 
 1. 서론, 본문(2-3개 섹션), 결론의 기본 흐름을 포함해주세요.
@@ -624,81 +726,67 @@ def handle_input(user_input):
 
 이 흐름은 어떠신가요?
 """
-            response_text = process_model_request(prompt)
-            st.session_state.collected["suggested_flow"] = response_text
-            bot_say(response_text)
+                    response_text = process_model_request(prompt)
+                    st.session_state.collected["suggested_flow"] = response_text
+                    bot_say(response_text)
+                    # 같은 상태를 유지합니다
+                    return
+
+            with col2:
+                if st.button("직접 흐름 작성하기"):
+                    st.session_state.flow_rejection = False
+                    bot_say("""다음과 같은 형식으로 각 섹션의 흐름을 직접 작성해주세요:
+
+[서론] 제목
+[본문] 제목
+[본문] 제목
+[결론] 제목
+
+각 줄에 하나의 소제목을 입력해주세요. 각 소제목 앞에는 [서론], [본문], [결론] 중 하나를 포함해주세요.""")
+                    # 사용자 입력 모드로 설정
+                    st.session_state.user_flow_input = True
+                    return
+                
+            # 사용자가 흐름을 거부했지만 아직 버튼을 누르지 않은 경우 안내 메시지 표시
+            if hasattr(st.session_state, 'flow_rejection') and st.session_state.flow_rejection:
+                bot_say("위 옵션 중 하나를 선택해주세요.")
+                return
+                
+        # 직접 흐름 작성 모드인 경우 사용자 입력 처리
+        if hasattr(st.session_state, 'user_flow_input') and st.session_state.user_flow_input:
+            # 사용자 입력에서 소제목 추출
+            lines = user_input.strip().split('\n')
+            subtitles = []
+            
+            for line in lines:
+                if line.strip() and any(marker in line for marker in ["[서론]", "[본문]", "[결론]"]):
+                    subtitles.append(line.strip())
+                
+            if not subtitles:
+                bot_say("""소제목 형식이 올바르지 않습니다. 각 섹션에 [서론], [본문], [결론] 중 하나를 포함해주세요.
+
+예시:
+[서론] Postman의 이해와 필요성
+[본문] Postman 기본 기능 소개
+[본문] Postman을 활용한 API 테스트
+[결론] Postman 활용 팁
+
+다시 작성해주시겠어요?""")
+                return
+            
+            # 유효한 소제목이 있으면 계속 진행
+            st.session_state.collected["finalized_flow"] = subtitles
+            st.session_state.user_flow_input = False  # 입력 모드 종료
+            
+            # 도입부 작성 시작
+            process_intro_section()
             return
             
         # 진행 의사가 있는지 확인
         if any(word in user_input_lower for word in ["네", "좋아", "괜찮", "진행", "시작", "다음"]):
-            # 흐름 제안에서 소제목 추출
-            flow_text = st.session_state.collected.get("suggested_flow", "")
-            subtitles = []
-            for line in flow_text.split("\n"):
-                line = line.strip()
-                if line and ("[서론]" in line or "[본문]" in line or "[결론]" in line):
-                    # 앞에 번호가 있으면 제거 (예: "1. [서론] ..." -> "[서론] ...")
-                    if '. ' in line and line[0].isdigit():
-                        line = line.split('. ', 1)[1]
-                    subtitles.append(line)
-            
-            # 소제목이 추출되지 않은 경우 다시 처리
-            if not subtitles:
-                bot_say("""죄송합니다. 글 흐름에서 소제목을 추출하는데 문제가 있었습니다. 다음과 같은 형식으로 소제목을 직접 입력해주시겠어요?
-
-예시:
-[서론] Docker의 이해와 필요성
-[본문] Docker 기본 개념과 작동 원리
-[본문] Docker 실전 활용 사례
-[본문] Docker와 다른 컨테이너 기술 비교
-[결론] Docker의 미래와 학습 방향
-
-각 줄에 하나의 소제목을 입력해주세요. 각 소제목 앞에는 [서론], [본문], [결론] 중 하나를 포함해주세요.""")
-                return
-            
-            st.session_state.collected["finalized_flow"] = subtitles
-            
-            # 도입부(첫 번째 섹션) 작성 시작
-            intro_section = subtitles[0]
-            topic = st.session_state.collected.get('user_topic', '')
-            keywords = st.session_state.collected.get('user_keywords_raw', '')
-            style = st.session_state.collected.get('user_style_raw', '')
-            
-            prompt = f"""
-{REACT_SYSTEM_PROMPT}
-
-이 글의 서론 부분인 "{intro_section}"에 대한 초안을 작성해주세요.
-
-다음 요소를 포함해주세요:
-1. 주제에 대한 간결한 소개와 중요성
-2. 독자가 이 글을 읽어야 하는 이유
-3. 글에서 다룰 내용에 대한 간략한 개요
-4. 독자의 관심을 끌 수 있는 흥미로운 시작점
-
-주제: {topic}
-키워드: {keywords}
-스타일: {style}
-"""
-            
-            st.session_state.current_section_index = 0
-            response_text = process_model_request(prompt)
-            st.session_state.generated_drafts = {}
-            st.session_state.generated_drafts[intro_section] = response_text
-            
-            # UI에 도입부 표시 (문장별 수정 버튼 추가)
-            st.session_state.step = Step.INTRO_CONFIRM.value
-            
-            # 섹션 표시 및 수정 UI
-            bot_say(f"도입부 \"{intro_section}\"의 초안입니다:")
-            
-            # 문장 단위로 분리하여 각 문장에 수정 버튼 추가
-            paragraphs = response_text.split("\n\n")
-            formatted_content = ""
-            for p_idx, paragraph in enumerate(paragraphs):
-                if paragraph.strip():
-                    formatted_content += f"📝 문단 {p_idx+1}:\n{paragraph}\n\n"
-            
-            bot_say(formatted_content + "\n\n이 도입부 내용이 괜찮으신가요? 수정이 필요하면 '수정'이라고 말씀해주세요.")
+            # 상태를 FLOW_CONFIRM으로 변경
+            st.session_state.step = Step.FLOW_CONFIRM.value
+            process_flow_confirmation()
             return
             
         # 응답이 명확하지 않은 경우
@@ -706,119 +794,37 @@ def handle_input(user_input):
 - 진행하시려면 '네', '좋아요', '진행할게요'라고 말씀해주세요.
 - 수정이 필요하시다면 '수정', '다시', '바꿔' 등의 말씀을 해주세요.""")
 
-    # 도입부 확인 단계
-    elif step == Step.INTRO_CONFIRM.value:
-        user_input_lower = user_input.lower()
-        
-        # 수정 요청이 있는지 확인
-        if any(word in user_input_lower for word in ["수정", "바꿔", "다시", "다른", "변경", "고치", "아니"]):
-            subtitles = st.session_state.collected.get("finalized_flow", [])
-            current_section = subtitles[st.session_state.current_section_index]
+    # 흐름 확인 단계
+    elif step == Step.FLOW_CONFIRM.value:
+        # 직접 흐름 작성 모드인 경우 사용자 입력 처리
+        if hasattr(st.session_state, 'user_flow_input') and st.session_state.user_flow_input:
+            # 사용자 입력에서 소제목 추출
+            lines = user_input.strip().split('\n')
+            subtitles = []
             
-            # 수정 UI 제공
-            bot_say(f"도입부 \"{current_section}\"를 수정하겠습니다. 어떤 부분을 수정하고 싶으신가요?")
-            
-            # 현재 내용 표시
-            content = st.session_state.generated_drafts.get(current_section, "")
-            
-            # 문장 단위로 수정 UI 제공
-            paragraphs = content.split("\n\n")
-            formatted_content = ""
-            for p_idx, paragraph in enumerate(paragraphs):
-                if paragraph.strip():
-                    formatted_content += f"문단 {p_idx+1}:\n{paragraph}\n\n"
-            
-            bot_say(formatted_content + "\n\n수정하고 싶은 문단 번호와 수정 내용을 알려주세요. 예: '문단 1: 수정할 내용...'")
-            st.session_state.editing_mode = True
-            return
-        
-        # 진행 의사가 있는지 확인
-        if any(word in user_input_lower for word in ["네", "좋아", "괜찮", "진행", "시작", "다음"]):
-            # 다음 섹션으로 이동
-            subtitles = st.session_state.collected.get("finalized_flow", [])
-            st.session_state.current_section_index += 1
-            
-            if st.session_state.current_section_index >= len(subtitles):
-                # 모든 섹션을 완료했으면 전체 초안 표시
-                st.session_state.step = Step.FULL_DRAFT.value
-                show_full_draft()
+            for line in lines:
+                if line.strip() and any(marker in line for marker in ["[서론]", "[본문]", "[결론]"]):
+                    subtitles.append(line.strip())
+                
+            if not subtitles:
+                bot_say("""소제목 형식이 올바르지 않습니다. 각 섹션에 [서론], [본문], [결론] 중 하나를 포함해주세요.
+
+예시:
+[서론] Postman의 이해와 필요성
+[본문] Postman 기본 기능 소개
+[본문] Postman을 활용한 API 테스트
+[결론] Postman 활용 팁
+
+다시 작성해주시겠어요?""")
                 return
             
-            # 다음 섹션 작성
-            current_section = subtitles[st.session_state.current_section_index]
-            topic = st.session_state.collected.get('user_topic', '')
-            keywords = st.session_state.collected.get('user_keywords_raw', '')
-            style = st.session_state.collected.get('user_style_raw', '')
+            # 유효한 소제목이 있으면 계속 진행
+            st.session_state.collected["finalized_flow"] = subtitles
+            st.session_state.user_flow_input = False  # 입력 모드 종료
             
-            # 이전 섹션 내용 수집
-            previous_sections = ""
-            for i in range(st.session_state.current_section_index):
-                prev_title = subtitles[i]
-                prev_content = st.session_state.generated_drafts.get(prev_title, "")
-                previous_sections += f"## {prev_title}\n{prev_content}\n\n"
-            
-            # 현재 섹션이 결론인지 확인
-            if "[결론]" in current_section:
-                prompt = f"""
-{REACT_SYSTEM_PROMPT}
-
-이 글의 결론 부분인 "{current_section}"에 대한 초안을 작성해주세요.
-
-다음 요소를 포함해주세요:
-1. 글에서 다룬 핵심 내용 요약
-2. 주요 시사점 또는 교훈
-3. 독자가 다음으로 탐색할 수 있는 관련 주제 제안
-4. 독자의 행동을 유도하는 마무리
-
-이전 섹션 내용을 참고하여 일관성을 유지하세요:
-{previous_sections}
-
-주제: {topic}
-키워드: {keywords}
-스타일: {style}
-"""
-            else:
-                # 본문 섹션
-                prompt = f"""
-{REACT_SYSTEM_PROMPT}
-
-이 글의 본문 부분인 "{current_section}"에 대한 초안을 작성해주세요.
-
-다음 요소를 포함해주세요:
-1. 해당 섹션의 핵심 개념 설명
-2. 실제 작동하는 코드 예제와 설명
-3. 다른 접근법과의 비교 분석
-4. 실무 적용 사례 또는 예시
-
-이전 섹션 내용을 참고하여 일관성을 유지하세요:
-{previous_sections}
-
-주제: {topic}
-키워드: {keywords}
-스타일: {style}
-"""
-            
-            response_text = process_model_request(prompt)
-            st.session_state.generated_drafts[current_section] = response_text
-            
-            # 섹션 표시 및 수정 UI
-            bot_say(f"섹션 \"{current_section}\"의 초안입니다:")
-            
-            # 문단 단위로 분리하여 각 문단에 수정 버튼 추가
-            paragraphs = response_text.split("\n\n")
-            formatted_content = ""
-            for p_idx, paragraph in enumerate(paragraphs):
-                if paragraph.strip():
-                    formatted_content += f"문단 {p_idx+1}:\n{paragraph}\n\n"
-            
-            bot_say(formatted_content + "\n\n이 섹션 내용이 괜찮으신가요? 수정이 필요하면 '수정'이라고 말씀해주세요.")
-            st.session_state.step = Step.SECTION_CONFIRM.value
+            # 도입부 작성 시작
+            process_intro_section()
             return
-        
-        # 응답이 명확하지 않은 경우
-        bot_say("""도입부 내용에 대해 어떻게 생각하시나요?
-- 진행하시려면 '네', '좋아요', '진행할게요'라고 말씀해주세요.
-- 수정이 필요하시다면 '수정', '다시', '바꿔' 등의 말씀을 해주세요.""")
 
     # 전체 초안 표시 단계
     elif step == Step.FULL_DRAFT.value:
