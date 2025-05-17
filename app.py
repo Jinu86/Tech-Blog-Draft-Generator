@@ -415,9 +415,12 @@ if st.session_state.is_typing:
     with st.chat_message("assistant"):
         st.markdown('<div class="typing-indicator"><span class="typing-text">챗봇이 작성하고 있어요</span><span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span></div>', unsafe_allow_html=True)
 
-# 첫 질문 표시 (아직 메시지가 없는 경우)
-if not st.session_state.messages:
-    bot_say(PROMPT_TOPIC_QUESTION)
+# 인삿말이 없는 경우 첫 메시지 표시 (세션 신규 시작 또는 브라우저 새로고침 시)
+if len(st.session_state.messages) == 0:
+    with st.chat_message("assistant"):
+        st.markdown(PROMPT_TOPIC_QUESTION)
+    st.session_state.messages.append({"role": "assistant", "content": PROMPT_TOPIC_QUESTION})
+    st.session_state.step = Step.TOPIC_QUESTION.value
 
 # 사용자 메시지 처리 함수
 def user_say():
@@ -432,7 +435,7 @@ def user_say():
         st.session_state.processed = False
         st.rerun()
 
-# 타이핑 상태이고 미처리된 메시지가 있는 경우
+# 타이핑 상태이고 미처리된 메시지가 있는 경우 메시지 처리
 if st.session_state.is_typing and not st.session_state.processed and len(st.session_state.messages) > 0:
     if st.session_state.messages[-1]["role"] == "user":
         user_input = st.session_state.messages[-1]["content"]
@@ -874,105 +877,6 @@ def handle_section_confirm(user_input):
 - 진행하시려면 '네', '좋아요', '진행할게요'라고 말씀해주세요.
 - 수정이 필요하시다면 '수정', '다시', '바꿔' 등의 말씀을 해주세요.""")
 
-# 흐름 확인 단계 처리 함수
-def handle_flow_confirm(user_input):
-    user_input_lower = user_input.lower()
-    
-    # 수정 요청이 있는지 확인
-    if any(word in user_input_lower for word in ["수정", "바꿔", "다시", "다른", "변경", "고치", "아니"]):
-        # 흐름 수정을 위한 옵션 제시
-        st.session_state.flow_rejection = True
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("새 흐름 제안 받기"):
-                st.session_state.flow_rejection = False
-                # 새로운 흐름 제안을 위한 프롬프트 생성
-                prompt = f"""
-{REACT_SYSTEM_PROMPT}
-
-주제: {st.session_state.collected.get('user_topic', '')}
-키워드: {st.session_state.collected.get('user_keywords_raw', '')}
-스타일: {st.session_state.collected.get('user_style_raw', '')}
-
-위 정보를 바탕으로 블로그의 새로운 글 흐름을 제안해주세요. 이전에 제안된 흐름과는 다른 새로운 구성으로 제안해주세요.
-다음 가이드라인을 따라주세요:
-
-1. 서론, 본문(2-3개 섹션), 결론의 기본 흐름을 포함해주세요.
-2. 각 섹션은 명확하고 구체적인 제목을 가져야 합니다.
-3. 제목만 나열해주세요.
-4. 각 항목 앞에 번호를 붙여주세요(1., 2. 등).
-5. 각 섹션에 [서론], [본문], [결론] 중 하나를 포함해주세요.
-6. 마지막에 "이 흐름은 어떠신가요?"라고 물어봐주세요.
-"""
-                st.session_state.step = Step.FLOW_SUGGEST.value
-                response_text = process_model_request(prompt)
-                st.session_state.collected["suggested_flow"] = response_text
-                bot_say(response_text)
-                return
-
-        with col2:
-            if st.button("직접 흐름 수정하기"):
-                st.session_state.flow_rejection = False
-                bot_say("""다음과 같은 형식으로 각 섹션의 흐름을 직접 수정해주세요:
-
-[서론] 제목
-[본문] 제목
-[본문] 제목
-[결론] 제목
-
-각 줄에 하나의 소제목을 입력해주세요.""")
-                # 사용자 입력 모드로 설정
-                st.session_state.user_flow_input = True
-                return
-            
-        # 사용자가 흐름을 거부했지만 아직 버튼을 누르지 않은 경우 안내 메시지 표시
-        if hasattr(st.session_state, 'flow_rejection') and st.session_state.flow_rejection:
-            bot_say("위 옵션 중 하나를 선택해주세요.")
-            return
-    
-    # 진행 의사가 있는지 확인
-    if any(word in user_input_lower for word in ["네", "좋아", "괜찮", "진행", "시작", "다음"]):
-        # 첫 번째 섹션(서론)으로 이동
-        flow_items = st.session_state.collected.get("finalized_flow", [])
-        
-        if flow_items:
-            first_section = flow_items[0]
-            
-            # 도입부 작성 프롬프트 생성
-            prompt = PROMPT_INTRO_WRITE.format(
-                section_title=first_section,
-                topic=st.session_state.collected.get('user_topic', ''),
-                keywords=", ".join(st.session_state.collected.get('user_keywords', [])),
-                style=f"{st.session_state.collected.get('format_style', '')} / {st.session_state.collected.get('tone', '')} / {st.session_state.collected.get('audience', '')}"
-            )
-            
-            # 단계 변경 및 챗봇에게 도입부 작성 요청
-            st.session_state.step = Step.INTRO_WRITE.value
-            bot_say(f"좋습니다! 이제 첫 번째 섹션인 '{first_section}'에 대한 도입부를 작성해볼게요...")
-            
-            # API 호출하여 도입부 생성
-            intro_content = process_model_request(prompt)
-            
-            # 도입부 저장
-            st.session_state.current_section = first_section
-            st.session_state.draft_section_content = intro_content
-            
-            # 도입부 확인 요청
-            st.session_state.step = Step.INTRO_CONFIRM.value
-            confirm_message = PROMPT_INTRO_CONFIRM.format(intro_content=intro_content)
-            bot_say(confirm_message)
-            return
-        else:
-            # 흐름 추출 실패 시
-            bot_say("죄송합니다. 저장된 흐름을 처리하는 데 문제가 있었습니다. 다시 시도해주세요.")
-            st.session_state.step = Step.FLOW_SUGGEST.value
-            return
-    
-    # 응답이 명확하지 않은 경우
-    bot_say("""흐름 목록에 대해 어떻게 생각하시나요?
-- 진행하시려면 '네', '좋아요', '진행할게요'라고 말씀해주세요.
-- 수정이 필요하시다면 '수정', '다시', '바꿔' 등의 말씀을 해주세요.""")
-
 # 글 흐름 제안 단계 처리 함수
 def handle_flow_suggestion(user_input):
     user_input_lower = user_input.lower()
@@ -1099,6 +1003,7 @@ def handle_flow_suggestion(user_input):
         else:
             # 흐름 추출 실패 시
             bot_say("죄송합니다. 제안된 흐름을 처리하는 데 문제가 있었습니다. 다시 시도해주세요.")
+            st.session_state.step = Step.FLOW_SUGGEST.value
             return
     
     # 위 조건에 해당하지 않는 경우 안내 메시지 표시
