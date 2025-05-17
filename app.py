@@ -212,7 +212,7 @@ PROMPT_REVISION = """
 {previous_sections}
 
 수정 시 다음 사항을 고려해주세요:
-1. 사용자의 요청사항을 자연스럽게 반영해주세요. 특히 "여기만 바꿔줘", "이 부분을 수정해줘" 등 특정 부분만 수정하라는 요청에 주의해주세요.
+1. 사용자의 요청사항을 정확히 반영해주세요.
 2. 기술적 정확성을 유지하면서도 이해하기 쉽게 작성해주세요.
 3. 글의 전체적인 흐름과 일관성을 유지해주세요.
 4. 코드 예제가 있다면 정확하고 실행 가능하게 수정해주세요.
@@ -222,6 +222,8 @@ PROMPT_REVISION = """
 주제: {topic}
 키워드: {keywords}
 스타일: {style}
+
+수정된 내용은 마크다운 형식으로 작성해주세요.
 """
 
 # Gemini 모델 불러오기
@@ -464,27 +466,26 @@ with st.sidebar:
     current_step = st.session_state.step
     current_prefix = ""
     
-    # STYLE_CONFIRM일 때 flow로 표시하는 버그 수정
-    if current_step == Step.STYLE_CONFIRM.value:
-        current_prefix = "style"
-    # FLOW_SUGGEST/FLOW_CONFIRM일 때 flow로 표시
-    elif current_step in [Step.FLOW_SUGGEST.value, Step.FLOW_CONFIRM.value]:
-        current_prefix = "flow"
-    # INTRO_WRITE/INTRO_CONFIRM일 때 intro로 표시
-    elif current_step in [Step.INTRO_WRITE.value, Step.INTRO_CONFIRM.value]:
-        current_prefix = "intro"
-    # SECTION_WRITE/SECTION_CONFIRM/SECTION_EDIT일 때 section으로 표시
-    elif current_step in [Step.SECTION_WRITE.value, Step.SECTION_CONFIRM.value, Step.SECTION_EDIT.value]:
-        current_prefix = "section"
-    # FULL_DRAFT/DONE일 때 full_draft로 표시
-    elif current_step in [Step.FULL_DRAFT.value, Step.DONE.value]:
-        current_prefix = "full_draft"
-    # 그 외에는 기존 로직 사용
-    else:
-        for prefix, _ in steps:
-            if current_step.startswith(prefix):
-                current_prefix = prefix
-                break
+    # 단계별 prefix 매핑
+    step_prefix_map = {
+        Step.TOPIC_QUESTION.value: "topic",
+        Step.TOPIC_CONFIRM.value: "topic",
+        Step.KEYWORD_QUESTION.value: "keyword",
+        Step.KEYWORD_CONFIRM.value: "keyword",
+        Step.STYLE_QUESTION.value: "style",
+        Step.STYLE_CONFIRM.value: "style",
+        Step.FLOW_SUGGEST.value: "flow",
+        Step.FLOW_CONFIRM.value: "flow",
+        Step.INTRO_WRITE.value: "intro",
+        Step.INTRO_CONFIRM.value: "intro",
+        Step.SECTION_WRITE.value: "section",
+        Step.SECTION_CONFIRM.value: "section",
+        Step.SECTION_EDIT.value: "section",
+        Step.FULL_DRAFT.value: "full_draft",
+        Step.DONE.value: "full_draft"
+    }
+    
+    current_prefix = step_prefix_map.get(current_step, "")
     
     # 각 단계 표시
     for key, label in steps:
@@ -510,14 +511,44 @@ if len(st.session_state.messages) == 0:
     st.session_state.messages.append({"role": "assistant", "content": PROMPT_TOPIC_QUESTION})
     st.session_state.step = Step.TOPIC_QUESTION.value
 
-# 사용자 입력 대기
-user_say()
+# 사용자 입력 처리
+if prompt := st.chat_input("메시지를 입력하세요..."):
+    # 사용자 메시지 즉시 추가 및 표시
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    st.session_state.is_typing = True
+    st.session_state.processed = False
+    
+    # 메시지 처리
+    handle_input(prompt)
 
-# 타이핑 상태이고 미처리된 메시지가 있는 경우 메시지 처리
-if st.session_state.is_typing and not st.session_state.processed and len(st.session_state.messages) > 0:
-    if st.session_state.messages[-1]["role"] == "user":
-        user_input = st.session_state.messages[-1]["content"]
-        # 처리 완료 플래그 설정 (중복 처리 방지)
-        st.session_state.processed = True
-        # 실제 메시지 처리
-        handle_input(user_input)
+def handle_section_revision(section_title, user_request, original_draft):
+    # 이전 섹션 내용 수집
+    previous_sections = []
+    flow_items = st.session_state.collected.get("finalized_flow", [])
+    current_index = flow_items.index(section_title)
+    
+    for i in range(current_index):
+        prev_title = flow_items[i]
+        prev_content = st.session_state.generated_drafts.get(prev_title, "")
+        if prev_content:
+            previous_sections.append(f"## {prev_title}\n{prev_content}")
+    
+    previous_sections_text = "\n\n".join(previous_sections)
+    
+    # 수정 프롬프트 생성
+    prompt = PROMPT_REVISION.format(
+        section_title=section_title,
+        user_request=user_request,
+        original_draft=original_draft,
+        previous_sections=previous_sections_text,
+        topic=st.session_state.collected.get('user_topic', ''),
+        keywords=", ".join(st.session_state.collected.get('user_keywords', [])),
+        style=f"{st.session_state.collected.get('format_style', '')} / {st.session_state.collected.get('tone', '')} / {st.session_state.collected.get('audience', '')}"
+    )
+    
+    # 수정된 내용 생성
+    revised_content = process_model_request(prompt)
+    if revised_content:
+        st.session_state.draft_section_content = revised_content
+        return True
+    return False
