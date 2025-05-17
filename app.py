@@ -273,10 +273,13 @@ def show_full_draft():
 
 # 챗봇 메시지 전송 함수
 def bot_say(message):
+    """챗봇 메시지를 추가하고 즉시 표시하는 함수"""
     st.session_state.messages.append({"role": "assistant", "content": message})
+    with st.chat_message("assistant"):
+        st.markdown(message)
     st.session_state.is_typing = False
     st.session_state.processed = True
-    # 메시지는 메시지 출력 루프에서 표시됨
+    st.rerun()  # UI 즉시 업데이트
 
 # 사용자 입력 처리 함수
 def user_say():
@@ -380,7 +383,26 @@ if "is_typing" not in st.session_state:
     st.session_state.is_typing = False
     st.session_state.processed = True
 
-# 챗 UI
+# 메시지 출력 및 입력 처리
+def display_messages():
+    # 메시지 출력
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    # 타이핑 인디케이터 표시
+    if st.session_state.is_typing:
+        with st.chat_message("assistant"):
+            st.markdown('<div class="typing-indicator"><span class="typing-text">챗봇이 작성하고 있어요</span><span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span></div>', unsafe_allow_html=True)
+
+    # 첫 메시지 표시
+    if len(st.session_state.messages) == 0:
+        with st.chat_message("assistant"):
+            st.markdown(PROMPT_TOPIC_QUESTION)
+        st.session_state.messages.append({"role": "assistant", "content": PROMPT_TOPIC_QUESTION})
+        st.session_state.step = Step.TOPIC_QUESTION.value
+
+# 메인 UI
 st.title("🧠 기술 블로그 초안 생성 챗봇")
 st.markdown("---")
 
@@ -496,36 +518,26 @@ with st.sidebar:
         else:
             st.markdown(f'<div class="step-other">{label}</div>', unsafe_allow_html=True)
 
-# 메시지 출력
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-
-# 챗봇 타이핑 인디케이터 표시
-if st.session_state.is_typing:
-    with st.chat_message("assistant"):
-        st.markdown('<div class="typing-indicator"><span class="typing-text">챗봇이 작성하고 있어요</span><span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span></div>', unsafe_allow_html=True)
-
-# 인삿말이 없는 경우 첫 메시지 표시
-if len(st.session_state.messages) == 0:
-    with st.chat_message("assistant"):
-        st.markdown(PROMPT_TOPIC_QUESTION)
-    st.session_state.messages.append({"role": "assistant", "content": PROMPT_TOPIC_QUESTION})
-    st.session_state.step = Step.TOPIC_QUESTION.value
+# 메시지 표시
+display_messages()
 
 # 사용자 입력 처리
 if prompt := st.chat_input("메시지를 입력하세요..."):
-    # 사용자 메시지 즉시 추가
+    # 사용자 메시지 즉시 추가 및 표시
     st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
     
     # 타이핑 상태 설정
     st.session_state.is_typing = True
+    st.rerun()  # UI 즉시 업데이트
     
     # 메시지 처리
-    response = handle_input(prompt)
+    handle_input(prompt)
     
     # 타이핑 상태 해제
     st.session_state.is_typing = False
+    st.rerun()  # UI 즉시 업데이트
 
 def handle_section_revision(section_title, user_input, original_draft):
     """섹션 수정을 처리하는 함수"""
