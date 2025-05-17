@@ -422,31 +422,6 @@ if len(st.session_state.messages) == 0:
     st.session_state.messages.append({"role": "assistant", "content": PROMPT_TOPIC_QUESTION})
     st.session_state.step = Step.TOPIC_QUESTION.value
 
-# 사용자 메시지 처리 함수
-def user_say():
-    user_input = st.chat_input("메시지를 입력하세요")
-    if user_input:
-        st.session_state.messages.append({"role": "user", "content": user_input})
-        with st.chat_message("user"):
-            st.markdown(user_input)
-        
-        # 타이핑 인디케이터 표시 전 재실행
-        st.session_state.is_typing = True
-        st.session_state.processed = False
-        st.rerun()
-
-# 타이핑 상태이고 미처리된 메시지가 있는 경우 메시지 처리
-if st.session_state.is_typing and not st.session_state.processed and len(st.session_state.messages) > 0:
-    if st.session_state.messages[-1]["role"] == "user":
-        user_input = st.session_state.messages[-1]["content"]
-        # 처리 완료 플래그 설정 (중복 처리 방지)
-        st.session_state.processed = True
-        # 실제 메시지 처리
-        handle_input(user_input)
-
-# 사용자 입력 대기
-user_say()
-
 # 사용자 입력 처리 핵심 함수
 def handle_input(user_input):
     # 단계별 처리 로직
@@ -677,6 +652,31 @@ def handle_input(user_input):
         
     # 기타 상황에서는 안내 메시지
     bot_say("어떤 작업을 도와드릴까요?")
+
+# 사용자 메시지 처리 함수
+def user_say():
+    user_input = st.chat_input("메시지를 입력하세요")
+    if user_input:
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        with st.chat_message("user"):
+            st.markdown(user_input)
+        
+        # 타이핑 인디케이터 표시 전 재실행
+        st.session_state.is_typing = True
+        st.session_state.processed = False
+        st.rerun()
+
+# 타이핑 상태이고 미처리된 메시지가 있는 경우 메시지 처리
+if st.session_state.is_typing and not st.session_state.processed and len(st.session_state.messages) > 0:
+    if st.session_state.messages[-1]["role"] == "user":
+        user_input = st.session_state.messages[-1]["content"]
+        # 처리 완료 플래그 설정 (중복 처리 방지)
+        st.session_state.processed = True
+        # 실제 메시지 처리
+        handle_input(user_input)
+
+# 사용자 입력 대기
+user_say()
 
 # 도입부 확인 단계 처리 함수
 def handle_intro_confirm(user_input):
